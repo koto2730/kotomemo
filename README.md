@@ -1,13 +1,12 @@
 # kotomemo
 
-A Notepad-style text editor with Markdown and AI integration, built with **Kotlin Multiplatform + Compose Desktop** on **GraalVM 21**.
+A Notepad-style text editor and AI integration, built with **Kotlin Multiplatform + Compose Desktop** on **GraalVM 21**.
 
-> ⚠️ Early development. Core editor and HTTP integration work; Markdown rendering and single-binary Native Image distribution are still on the roadmap.
+> ⚠️ Early development. Core editor and HTTP integration work; single-binary Native Image distribution are still on the roadmap.
 
 ## Goals
 
 - A Notepad replacement worth using in 2026: tabs, regex, sane encoding handling
-- Markdown rendering (planned)
 - Generic, configurable HTTP integration so any LLM / webhook / private backend can receive the selected text
 
 ## Features
@@ -84,7 +83,6 @@ The `framework` layer depends on `adapter` depends on `usecase` depends on `enti
 - [ ] Native Image build (single-file `kotomemo.exe` without bundled JRE)
 - [ ] GitHub Actions CI for build + tests on Windows / macOS / Linux
 - [ ] GitHub Actions release workflow for distributions
-- [ ] Markdown rendering pane
 - [ ] VSCode TextMate grammar import for richer syntax highlighting
 - [ ] Better IME support (CorvusSKK / TSF) — currently Google IME works, CorvusSKK does not
 - [ ] Helpers for Windows context menu / "open with" registration
