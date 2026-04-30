@@ -110,6 +110,22 @@ fun FrameWindowScope.AppMenuBar(state: EditorState, onExit: () -> Unit) {
                 onClick = { state.zoomReset() },
             )
         }
+        Menu("Send", mnemonic = 'S') {
+            val presets = state.appConfig.presets
+            if (presets.isEmpty()) {
+                Item("(no presets)", enabled = false, onClick = {})
+            } else {
+                presets.forEach { p ->
+                    Item(
+                        p.name,
+                        enabled = !state.sendBusy,
+                        onClick = { state.sendWithPreset(p) },
+                    )
+                }
+            }
+            Separator()
+            Item("Configure presets…", onClick = { state.presetDialogOpen = true })
+        }
         Menu("Format", mnemonic = 'O') {
             Menu("Line Ending") {
                 LineEnding.entries.forEach { le ->

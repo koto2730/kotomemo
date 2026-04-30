@@ -7,14 +7,19 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.input.TextFieldValue
 import com.ictglabo.kotomemo.adapter.controller.EditorController
+import com.ictglabo.kotomemo.entity.ApiPreset
+import com.ictglabo.kotomemo.entity.AppConfig
 import com.ictglabo.kotomemo.entity.Contents
 import com.ictglabo.kotomemo.entity.LineEnding
+import com.ictglabo.kotomemo.entity.ResponseTarget
 import com.ictglabo.kotomemo.usecase.BulkIndentCommand
 import com.ictglabo.kotomemo.usecase.FindMatchesCommand
 import com.ictglabo.kotomemo.usecase.ReplaceAllCommand
+import com.ictglabo.kotomemo.usecase.SendRequestCommand
 import java.nio.charset.Charset
 import java.nio.file.Files
 import java.nio.file.Path
+import kotlin.concurrent.thread
 
 class TabState(initial: Contents) {
     var contents by mutableStateOf(initial)
@@ -72,6 +77,10 @@ class EditorState(
     var editorFont by mutableStateOf(EditorFont())
     var zoomPercent by mutableStateOf(100)
     val finder = FinderState()
+    var appConfig by mutableStateOf(AppConfig.EMPTY)
+    var sendBusy by mutableStateOf(false)
+    var sendStatus by mutableStateOf<String?>(null)
+    var presetDialogOpen by mutableStateOf(false)
 
     val effectiveFontSize: Int
         get() = ((editorFont.size * zoomPercent) / 100).coerceAtLeast(EditorFont.MIN_SIZE)
@@ -80,6 +89,82 @@ class EditorState(
 
     init {
         newTab()
+        appConfig = controller.loadConfig()
+    }
+
+    fun reloadConfig() {
+        appConfig = controller.loadConfig()
+    }
+
+    fun saveConfig(newConfig: AppConfig) {
+        controller.saveConfig(newConfig)
+        appConfig = newConfig
+    }
+
+    fun sendWithPreset(preset: ApiPreset) {
+        if (sendBusy) return
+        val tab = current ?: return
+        val sel = tab.fieldValue.selection
+        val selectedText = if (sel.collapsed) tab.fieldValue.text
+        else tab.fieldValue.text.substring(sel.min, sel.max)
+        val filename = tab.contents.displayName
+        sendBusy = true
+        sendStatus = "Sending to '${preset.name}'…"
+        thread(name = "kotomemo-send", isDaemon = true) {
+            val out = controller.send(
+                SendRequestCommand.Input(
+                    preset = preset,
+                    selection = selectedText,
+                    filename = filename,
+                    tokens = appConfig.tokens,
+                ),
+            )
+            handleSendResult(preset, sel.min, sel.max, out)
+        }
+    }
+
+    private fun handleSendResult(
+        preset: ApiPreset,
+        selStart: Int,
+        selEnd: Int,
+        out: SendRequestCommand.Output,
+    ) {
+        when (out) {
+            is SendRequestCommand.Output.Failure -> {
+                sendStatus = "Send failed: ${out.message}"
+            }
+            is SendRequestCommand.Output.Success -> {
+                sendStatus = "Send OK (${out.status})"
+                when (preset.responseTarget) {
+                    ResponseTarget.NewTab -> {
+                        val empty = controller.newContents().copy(text = out.extracted, isDirty = true)
+                        tabs += TabState(empty)
+                        selectedIndex = tabs.lastIndex
+                    }
+                    ResponseTarget.AfterSelection -> insertAfterSelection(selStart, selEnd, out.extracted)
+                    ResponseTarget.StatusOnly -> Unit
+                }
+            }
+        }
+        sendBusy = false
+    }
+
+    private fun insertAfterSelection(selStart: Int, selEnd: Int, response: String) {
+        val tab = current ?: return
+        val text = tab.fieldValue.text
+        val end = selEnd.coerceIn(0, text.length)
+        // ensure we land at the start of the next line: insert a newline if needed
+        val needsNewlineBefore = end > 0 && text[end - 1] != '\n'
+        val needsNewlineAfter = !response.endsWith('\n')
+        val payload = buildString {
+            if (needsNewlineBefore) append('\n')
+            append(response)
+            if (needsNewlineAfter) append('\n')
+        }
+        val newText = text.substring(0, end) + payload + text.substring(end)
+        // Restore the original selection (offsets are unaffected because insertion is to the right of selEnd)
+        val newSel = androidx.compose.ui.text.TextRange(selStart, selEnd)
+        tab.applyText(androidx.compose.ui.text.input.TextFieldValue(newText, newSel))
     }
 
     fun newTab() {

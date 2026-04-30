@@ -33,5 +33,6 @@ fun StatusBar(state: EditorState) {
         Text(tab.contents.lineEnding.name, style = MaterialTheme.typography.bodySmall)
         Text(if (tab.contents.hasBom) "BOM" else "no BOM", style = MaterialTheme.typography.bodySmall)
         Text("${state.zoomPercent}%", style = MaterialTheme.typography.bodySmall)
+        state.sendStatus?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
     }
 }
