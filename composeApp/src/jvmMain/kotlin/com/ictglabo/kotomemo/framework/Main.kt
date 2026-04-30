@@ -1,5 +1,6 @@
 package com.ictglabo.kotomemo.framework
 
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.window.Window
 import androidx.compose.ui.window.application
 import com.ictglabo.kotomemo.adapter.controller.EditorController
@@ -36,6 +37,7 @@ fun main(args: Array<String>) {
         Window(
             onCloseRequest = ::exitApplication,
             title = "kotomemo",
+            icon = painterResource("icon.png"),
         ) {
             AppWindow(controller, initialPaths, onExit = ::exitApplication)
         }

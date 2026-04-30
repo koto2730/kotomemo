@@ -98,13 +98,18 @@ compose.desktop {
                 // Stable upgrade UUID - keep this fixed across versions or upgrades
                 // will install side-by-side instead of replacing the previous one.
                 upgradeUuid = "8c1b2b34-7a45-4d22-9b3e-f0c8b7a6d5e1"
+                iconFile.set(rootProject.file("assets/icon.ico"))
             }
             macOS {
                 bundleID = "com.ictglabo.kotomemo"
+                // TODO: provide assets/icon.icns once a Mac is available to run
+                //   iconutil -c icns assets/icon.iconset
+                // (jpackage requires .icns on macOS; .png/.ico are not accepted.)
             }
             linux {
                 debMaintainer = "ictglabo"
                 menuGroup = "Utilities"
+                iconFile.set(rootProject.file("assets/icon.png"))
             }
         }
     }
