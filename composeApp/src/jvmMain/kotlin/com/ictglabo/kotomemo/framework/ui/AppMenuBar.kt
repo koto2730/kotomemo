@@ -94,9 +94,12 @@ fun FrameWindowScope.AppMenuBar(state: EditorState, onExit: () -> Unit) {
             )
         }
         Menu("View", mnemonic = 'V') {
+            // Ctrl+Shift+Minus is the same physical chord as Ctrl++ on a US
+            // layout and Ctrl+= on a JIS layout, so a single binding covers
+            // both keyboard layouts naturally.
             Item(
                 "Zoom In",
-                shortcut = KeyShortcut(Key.Equals, ctrl = true),
+                shortcut = KeyShortcut(Key.Minus, ctrl = true, shift = true),
                 onClick = { state.zoomIn() },
             )
             Item(

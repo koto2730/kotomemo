@@ -59,6 +59,13 @@ fun EditorPane(state: EditorState, tab: TabState?) {
                             state.finder.toggleFind()
                             true
                         }
+                        // Accept Ctrl+= as an alternative Zoom In on US
+                        // layouts where '=' is its own key. JIS users get the
+                        // same effect via Ctrl+Shift+- registered on the menu.
+                        event.isCtrlPressed && event.key == Key.Equals -> {
+                            state.zoomIn()
+                            true
+                        }
                         event.key == Key.Tab -> handleTab(tab, state, outdent = event.isShiftPressed)
                         else -> false
                     }

@@ -39,23 +39,56 @@ kotlin {
 }
 
 
-// Resolve the GraalVM 21 toolchain so it can be used independently of JAVA_HOME.
+// Resolve the GraalVM 21 toolchain so the Kotlin compiler / tests run on it
+// regardless of JAVA_HOME. Phase 5c (Native Image) will lean on this.
 val graal21Launcher = javaToolchains.launcherFor {
     languageVersion.set(JavaLanguageVersion.of(21))
     vendor.set(JvmVendorSpec.GRAAL_VM)
 }
 
+// Use a vanilla Oracle JDK 21 for the packaged application runtime. GraalVM CE
+// 21's jlink'd runtime fails to start when bundled by jpackage ("JVM not
+// found") — its native JIT (jvmcicompiler.dll) needs modules that the trimmed
+// runtime image does not carry. Disabling JVMCI was not enough, so the bundled
+// runtime needs to be a plain HotSpot JDK. Compile-time tasks still run on
+// GraalVM via kotlin.jvmToolchain above; only the runtime that ships with the
+// installer changes here.
+val packagingLauncher = javaToolchains.launcherFor {
+    languageVersion.set(JavaLanguageVersion.of(21))
+    vendor.set(JvmVendorSpec.ORACLE)
+}
+
 compose.desktop {
     application {
         mainClass = "com.ictglabo.kotomemo.framework.MainKt"
-        javaHome = graal21Launcher.get().metadata.installationPath.asFile.absolutePath
+        javaHome = packagingLauncher.get().metadata.installationPath.asFile.absolutePath
 
         nativeDistributions {
             targetFormats(TargetFormat.Dmg, TargetFormat.Msi, TargetFormat.Deb)
             packageName = "kotomemo"
             packageVersion = "1.0.0"
-            description = "kotomemo - a Notepad-style editor with markdown and AI integration."
+            description = "kotomemo - a Notepad-style editor."
             vendor = "ictglabo"
+
+            // Modules that Compose / Kotlin commonly need but jpackage's
+            // module discovery can miss when only the project's own classes
+            // are scanned. Listing them explicitly avoids a class of cryptic
+            // launch failures.
+            //
+            // java.net.http is required by adapter.http.JdkHttpClient (Phase 4).
+            // The auto-discovery somehow misses it, so the bundled runtime ends
+            // up without HttpClient and the app crashes at startup with
+            // NoClassDefFoundError: java/net/http/HttpClient.
+            modules(
+                "java.net.http",
+                "jdk.unsupported",
+                "java.naming",
+                "java.management",
+                "java.sql",
+                "java.scripting",
+                "java.security.jgss",
+                "jdk.crypto.cryptoki",
+            )
             // TODO: re-enable once we have an RTF license file (WiX light.exe rejects plain text).
             // licenseFile.set(rootProject.file("LICENSE"))
 
