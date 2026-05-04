@@ -3,9 +3,7 @@ package com.ictglabo.kotomemo.framework.ui
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.BasicTextField
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.LocalTextStyle
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -34,7 +32,6 @@ fun EditorPane(state: EditorState, tab: TabState?) {
             Text("No tab", style = MaterialTheme.typography.bodyMedium)
             return@Box
         }
-        val scroll = rememberScrollState()
         val text = tab.fieldValue.text
         val path = tab.contents.filePath
         val transformation = remember(text, path) {
@@ -42,12 +39,16 @@ fun EditorPane(state: EditorState, tab: TabState?) {
             val tokens = HighlightCommand().execute(HighlightCommand.Input(text, ruleSet))
             HighlightTransformation(tokens)
         }
+        // Don't wrap BasicTextField in Modifier.verticalScroll. It has its own
+        // internal scrolling for multi-line content that auto-follows the
+        // caret on Enter and survives focus changes; an outer scroll fights
+        // with that and produces "Enter doesn't scroll" plus "click jumps
+        // back to top" bugs.
         BasicTextField(
             value = tab.fieldValue,
             onValueChange = tab::applyText,
             modifier = Modifier
                 .fillMaxSize()
-                .verticalScroll(scroll)
                 .onPreviewKeyEvent { event ->
                     if (event.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
                     when {
