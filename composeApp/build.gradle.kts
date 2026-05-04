@@ -58,6 +58,57 @@ val packagingLauncher = javaToolchains.launcherFor {
     vendor.set(JvmVendorSpec.ORACLE)
 }
 
+// Phase 5c: probe Native Image directly. The official org.graalvm.buildtools
+// Gradle plugin does not register tasks under a kotlin("multiplatform")
+// project, so we drive native-image ourselves. This first cut is intentionally
+// minimal: no reachability metadata, no agent traces, no module tweaks. The
+// goal is to see exactly where compilation explodes.
+val nativeImageOutputDir = layout.buildDirectory.dir("native/nativeCompile")
+val nativeImageExe = graal21Launcher.get().metadata.installationPath.asFile
+    .resolve("bin/native-image.cmd")
+
+tasks.register<Exec>("nativeCompile") {
+    group = "build"
+    description = "Build a Native Image executable with GraalVM"
+    notCompatibleWithConfigurationCache(
+        "Custom native-image task resolves the runtime classpath at execution time."
+    )
+    dependsOn(tasks.named("jvmJar"))
+
+    val outputDir = nativeImageOutputDir.get().asFile
+    workingDir = outputDir
+
+    val jvmJarTask = tasks.named<Jar>("jvmJar")
+    val runtimeClasspath = configurations.named("jvmRuntimeClasspath")
+
+    inputs.files(jvmJarTask)
+    inputs.files(runtimeClasspath)
+    outputs.file(outputDir.resolve("kotomemo.exe"))
+
+    doFirst {
+        outputDir.mkdirs()
+        // Forward slashes avoid backslash-escape headaches in the @argfile.
+        val cp = (runtimeClasspath.get().files + jvmJarTask.get().archiveFile.get().asFile)
+            .joinToString(File.pathSeparator) { it.absolutePath.replace("\\", "/") }
+
+        // Windows command line is capped at ~32 KB; Compose's classpath blows
+        // past that easily. Pass arguments via a Java @argfile instead.
+        val argFile = outputDir.resolve("native-image.args").apply {
+            writeText(
+                buildString {
+                    appendLine("-cp")
+                    appendLine(cp)
+                    appendLine("--no-fallback")
+                    appendLine("-H:+UnlockExperimentalVMOptions")
+                    appendLine("-H:Name=kotomemo")
+                    appendLine("com.ictglabo.kotomemo.framework.MainKt")
+                },
+            )
+        }
+        commandLine(nativeImageExe.absolutePath, "@${argFile.absolutePath}")
+    }
+}
+
 compose.desktop {
     application {
         mainClass = "com.ictglabo.kotomemo.framework.MainKt"
