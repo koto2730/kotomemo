@@ -1,0 +1,62 @@
+# CI: build + tests + package the per-OS portable artifact on every push to
+# the active branches and on PRs targeting main. Does NOT attach to a
+# GitHub Release - that happens in release.yml (tag push only).
+#
+# Per-OS task matrix:
+#   windows-latest -> packagePortableExe (warp-packer) + packageMsi (jpackage)
+#   macos-latest   -> packageDmg          (jpackage; arm64 runner)
+#   ubuntu-latest  -> packageAppImage     (appimagetool wrapping app-image)
+#
+# Gradle's Foojay toolchain auto-downloads GraalVM CE 21 (compile) and
+# Oracle JDK 21 (jpackage runtime) on demand, so we do not need
+# actions/setup-java here. gradle/actions/setup-gradle handles the wrapper
+# and caches ~/.gradle to keep subsequent runs fast.
+
+name: build
+
+on:
+  push:
+    branches: [main, build-setting]
+  pull_request:
+    branches: [main]
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            label: windows
+            packageTasks: ":composeApp:packagePortableExe :composeApp:packageMsi"
+            artifactPath: |
+              composeApp/build/portable/kotomemo-portable.exe
+              composeApp/build/compose/binaries/main/msi/*.msi
+          - os: macos-latest
+            label: macos-arm64
+            packageTasks: ":composeApp:packageDmg"
+            artifactPath: composeApp/build/compose/binaries/main/dmg/*.dmg
+          - os: ubuntu-latest
+            label: linux
+            packageTasks: ":composeApp:packageAppImage"
+            artifactPath: composeApp/build/portable/kotomemo-x86_64.AppImage
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        # ./gradlew is a POSIX shell script; bash is available on every
+        # GitHub runner including Windows (Git Bash). Forcing it removes
+        # per-OS branching in the run lines below.
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      - name: Tests + packaging
+        run: ./gradlew :composeApp:jvmTest ${{ matrix.packageTasks }} --stacktrace
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: kotomemo-${{ matrix.label }}
+          path: ${{ matrix.artifactPath }}
+          if-no-files-found: error

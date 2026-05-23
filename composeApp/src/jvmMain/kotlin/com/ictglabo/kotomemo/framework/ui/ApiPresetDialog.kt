@@ -46,6 +46,16 @@ fun ApiPresetDialog(state: EditorState) {
     val dialogState = rememberDialogState(size = DpSize(880.dp, 640.dp))
     val initial = remember { state.appConfig }
     val presets = remember { mutableStateListOf<ApiPreset>().apply { addAll(initial.presets) } }
+    // Headers are stored as raw text per preset while the dialog is open and
+    // only parsed to Map<String,String> at save time. If we round-tripped
+    // through ApiPreset.headers on every keystroke, half-typed lines like
+    // "Authoriz" (no colon yet) would parse to an empty map and the keystroke
+    // would disappear from the field. Same pattern as tokensText below.
+    val headerDrafts = remember {
+        mutableStateListOf<String>().apply {
+            initial.presets.forEach { add(headersToText(it.headers)) }
+        }
+    }
     var tokensText by remember {
         mutableStateOf(initial.tokens.entries.joinToString("\n") { "${it.key}=${it.value}" })
     }
@@ -65,11 +75,13 @@ fun ApiPresetDialog(state: EditorState) {
                         onSelect = { selectedIndex = it },
                         onAdd = {
                             presets += ApiPreset(name = "new-${presets.size + 1}", url = "https://")
+                            headerDrafts += ""
                             selectedIndex = presets.lastIndex
                         },
                         onRemove = {
                             if (selectedIndex in presets.indices) {
                                 presets.removeAt(selectedIndex)
+                                headerDrafts.removeAt(selectedIndex)
                                 selectedIndex = if (presets.isEmpty()) -1
                                 else selectedIndex.coerceAtMost(presets.lastIndex)
                             }
@@ -79,7 +91,9 @@ fun ApiPresetDialog(state: EditorState) {
                     if (selectedIndex in presets.indices) {
                         PresetForm(
                             preset = presets[selectedIndex],
+                            headersText = headerDrafts[selectedIndex],
                             onUpdate = { presets[selectedIndex] = it },
+                            onHeadersTextChange = { headerDrafts[selectedIndex] = it },
                             modifier = Modifier.weight(1f).fillMaxHeight(),
                         )
                     } else {
@@ -101,7 +115,10 @@ fun ApiPresetDialog(state: EditorState) {
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     Button(onClick = {
                         val tokens = parseTokens(tokensText)
-                        state.saveConfig(AppConfig(presets = presets.toList(), tokens = tokens))
+                        val finalPresets = presets.mapIndexed { idx, p ->
+                            p.copy(headers = textToHeaders(headerDrafts[idx]))
+                        }
+                        state.saveConfig(AppConfig(presets = finalPresets, tokens = tokens))
                         state.presetDialogOpen = false
                     }) { Text("Save") }
                     OutlinedButton(onClick = { state.presetDialogOpen = false }) { Text("Cancel") }
@@ -165,7 +182,9 @@ private fun PresetList(
 @Composable
 private fun PresetForm(
     preset: ApiPreset,
+    headersText: String,
     onUpdate: (ApiPreset) -> Unit,
+    onHeadersTextChange: (String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     Column(modifier = modifier.verticalScroll(rememberScrollState())) {
@@ -180,7 +199,7 @@ private fun PresetForm(
         OutlinedTextField(
             value = preset.url,
             onValueChange = { onUpdate(preset.copy(url = it)) },
-            label = { Text("URL") },
+            label = { Text("URL — supports {{selection}}, {{tokens.NAME}}, etc.") },
             modifier = Modifier.fillMaxWidth(),
             singleLine = true,
         )
@@ -191,9 +210,12 @@ private fun PresetForm(
         }
         Spacer(Modifier.height(6.dp))
         OutlinedTextField(
-            value = headersToText(preset.headers),
-            onValueChange = { onUpdate(preset.copy(headers = textToHeaders(it))) },
-            label = { Text("Headers (one per line, key: value)") },
+            value = headersText,
+            onValueChange = onHeadersTextChange,
+            label = {
+                Text("Headers (one per line, key: value) — values support {{selection}}, {{tokens.NAME}}, etc.")
+            },
+            placeholder = { Text("Authorization: Bearer {{tokens.openai}}\nContent-Type: application/json") },
             modifier = Modifier.fillMaxWidth().height(96.dp),
         )
         Spacer(Modifier.height(6.dp))
