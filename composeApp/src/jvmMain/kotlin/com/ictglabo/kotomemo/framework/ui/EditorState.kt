@@ -81,6 +81,7 @@ class EditorState(
     var sendBusy by mutableStateOf(false)
     var sendStatus by mutableStateOf<String?>(null)
     var presetDialogOpen by mutableStateOf(false)
+    var sendPaletteOpen by mutableStateOf(false)
 
     val effectiveFontSize: Int
         get() = ((editorFont.size * zoomPercent) / 100).coerceAtLeast(EditorFont.MIN_SIZE)
