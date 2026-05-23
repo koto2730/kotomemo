@@ -374,13 +374,19 @@ val packageAppImage by tasks.registering {
         out.parentFile.mkdirs()
 
         // --appimage-extract-and-run avoids the FUSE dependency on the host.
-        val exit = ProcessBuilder(
+        // Capture stdout+stderr explicitly so we can surface appimagetool's
+        // real error message - inheritIO() under Gradle can swallow output
+        // from short-lived subprocesses on CI.
+        val proc = ProcessBuilder(
             appimagetool.get().asFile.absolutePath,
             "--appimage-extract-and-run",
             appDir.absolutePath,
             out.absolutePath,
-        ).inheritIO().start().waitFor()
-        if (exit != 0) throw GradleException("appimagetool failed (exit $exit)")
+        ).redirectErrorStream(true).start()
+        val captured = proc.inputStream.bufferedReader().readText()
+        val exit = proc.waitFor()
+        logger.lifecycle("appimagetool output:\n$captured")
+        if (exit != 0) throw GradleException("appimagetool failed (exit $exit):\n$captured")
 
         logger.lifecycle("final AppImage: ${out.length() / 1024 / 1024} MB")
     }
