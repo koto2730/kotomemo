@@ -265,3 +265,123 @@ val packagePortableExe by tasks.registering {
         logger.lifecycle("final portable exe: ${out.length() / 1024 / 1024} MB")
     }
 }
+
+// ---------------------------------------------------------------------------
+// Portable single-file AppImage for Linux.
+//
+// jpackage produces a kotomemo/ folder (bin/, lib/, runtime/) and a .deb on
+// Linux. AppImage wraps that folder into one executable that works on any
+// modern distro - users download it, chmod +x, double-click. Same role as
+// kotomemo-portable.exe on Windows.
+//
+// Only runs on Linux (jpackage's createDistributable is host-native). On
+// other OSes the task is skipped with a log message so the same Gradle
+// invocation is safe on every CI runner.
+//
+// appimagetool is itself distributed as an AppImage. We invoke it via
+// --appimage-extract-and-run so it works on hosts without FUSE (e.g. GitHub
+// Actions ubuntu runners). Pinned to AppImage/appimagetool 1.9.1 (the
+// current active repo; the older AppImageKit repo is archived).
+// ---------------------------------------------------------------------------
+
+val appimagetoolVersion = "1.9.1"
+val appimagetoolRelativePath = "tools/appimagetool-$appimagetoolVersion-x86_64.AppImage"
+
+val downloadAppimagetool by tasks.registering {
+    val targetFile = layout.buildDirectory.file(appimagetoolRelativePath)
+    val downloadUrl =
+        "https://github.com/AppImage/appimagetool/releases/download/$appimagetoolVersion/appimagetool-x86_64.AppImage"
+    outputs.file(targetFile)
+    doLast {
+        val file = targetFile.get().asFile
+        if (file.exists()) return@doLast
+        file.parentFile.mkdirs()
+        URI(downloadUrl).toURL().openStream().use { input: java.io.InputStream ->
+            file.outputStream().use { output -> input.copyTo(output) }
+        }
+        file.setExecutable(true)
+    }
+}
+
+val packageAppImage by tasks.registering {
+    group = "compose desktop"
+    description = "Wraps the createDistributable app-image into a single .AppImage for Linux."
+
+    dependsOn("createDistributable", downloadAppimagetool)
+
+    val appImageDir = layout.buildDirectory.dir("compose/binaries/main/app/kotomemo")
+    val appDirRoot = layout.buildDirectory.dir("appimage/kotomemo.AppDir")
+    val outputFile = layout.buildDirectory.file("portable/kotomemo-x86_64.AppImage")
+    val appimagetool = layout.buildDirectory.file(appimagetoolRelativePath)
+    val iconFile = rootProject.file("assets/icon.png")
+
+    inputs.dir(appImageDir)
+    inputs.file(appimagetool)
+    inputs.file(iconFile)
+    outputs.file(outputFile)
+
+    onlyIf {
+        val osName = System.getProperty("os.name").lowercase()
+        val isLinux = osName.contains("linux")
+        if (!isLinux) {
+            logger.lifecycle("Skipping packageAppImage: requires Linux (current os.name: $osName)")
+        }
+        isLinux
+    }
+
+    doLast {
+        val appDir = appDirRoot.get().asFile
+        val source = appImageDir.get().asFile
+        val out = outputFile.get().asFile
+
+        // Rebuild AppDir from scratch each run so stale files from a previous
+        // structure cannot leak into the AppImage.
+        if (appDir.exists()) appDir.deleteRecursively()
+        appDir.mkdirs()
+
+        // Copy the entire jpackage app-image folder under kotomemo/ inside
+        // the AppDir. Keeping its bin/lib/runtime layout intact means we do
+        // not have to teach the launcher about a relocated runtime.
+        val embedded = File(appDir, "kotomemo")
+        source.copyRecursively(embedded)
+
+        // AppRun is the entrypoint AppImage invokes. ${'$'} writes a literal
+        // $ since this is a Kotlin string template, not a shell heredoc.
+        val appRun = File(appDir, "AppRun")
+        appRun.writeText(
+            "#!/bin/bash\n" +
+                "HERE=\"${'$'}(dirname \"${'$'}(readlink -f \"${'$'}{0}\")\")\"\n" +
+                "exec \"${'$'}{HERE}/kotomemo/bin/kotomemo\" \"${'$'}@\"\n"
+        )
+        appRun.setExecutable(true)
+
+        // .desktop entry. Icon= references the basename of the icon file in
+        // AppDir root (kotomemo.png -> Icon=kotomemo).
+        File(appDir, "kotomemo.desktop").writeText(
+            """
+            [Desktop Entry]
+            Type=Application
+            Name=kotomemo
+            Exec=kotomemo
+            Icon=kotomemo
+            Categories=Utility;TextEditor;
+            Terminal=false
+            """.trimIndent() + "\n"
+        )
+
+        iconFile.copyTo(File(appDir, "kotomemo.png"), overwrite = true)
+
+        out.parentFile.mkdirs()
+
+        // --appimage-extract-and-run avoids the FUSE dependency on the host.
+        val exit = ProcessBuilder(
+            appimagetool.get().asFile.absolutePath,
+            "--appimage-extract-and-run",
+            appDir.absolutePath,
+            out.absolutePath,
+        ).inheritIO().start().waitFor()
+        if (exit != 0) throw GradleException("appimagetool failed (exit $exit)")
+
+        logger.lifecycle("final AppImage: ${out.length() / 1024 / 1024} MB")
+    }
+}
