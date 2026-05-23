@@ -1,0 +1,87 @@
+# Release: triggered by pushing a v* tag.
+#
+# Builds the same per-OS artifacts as build.yml on the same 3-OS matrix,
+# then a release job downloads all artifacts and creates a GitHub Release
+# as a *draft*. The draft lets the maintainer review the contents and the
+# auto-generated release notes before publishing.
+#
+# Re-tagging will fail because gh release create refuses to overwrite an
+# existing release - delete the previous release manually if you need to
+# retry a tag.
+
+name: release
+
+on:
+  push:
+    tags: ['v*']
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            label: windows
+            packageTasks: ":composeApp:packagePortableExe :composeApp:packageMsi"
+            artifactPath: |
+              composeApp/build/portable/kotomemo-portable.exe
+              composeApp/build/compose/binaries/main/msi/*.msi
+          - os: macos-latest
+            label: macos-arm64
+            packageTasks: ":composeApp:packageDmg"
+            artifactPath: composeApp/build/compose/binaries/main/dmg/*.dmg
+          - os: ubuntu-latest
+            label: linux
+            packageTasks: ":composeApp:packageAppImage"
+            artifactPath: composeApp/build/portable/kotomemo-x86_64.AppImage
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      - name: Tests + packaging
+        run: ./gradlew :composeApp:jvmTest ${{ matrix.packageTasks }} --stacktrace
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: kotomemo-${{ matrix.label }}
+          path: ${{ matrix.artifactPath }}
+          if-no-files-found: error
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    # GITHUB_TOKEN is read-only by default; releases need contents: write.
+    permissions:
+      contents: write
+    steps:
+      # Checkout is needed so gh release --generate-notes can walk the
+      # commit graph between tags.
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/download-artifact@v4
+        with:
+          # No name filter -> download all artifacts uploaded by the build
+          # matrix into ./artifacts/<artifact-name>/<files>.
+          path: artifacts
+
+      - name: List downloaded artifacts
+        run: ls -lR artifacts/
+
+      - name: Create draft release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create "${{ github.ref_name }}" \
+            --draft \
+            --title "${{ github.ref_name }}" \
+            --generate-notes \
+            --repo "${{ github.repository }}" \
+            artifacts/*/*
