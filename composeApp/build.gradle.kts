@@ -377,12 +377,17 @@ val packageAppImage by tasks.registering {
         // Capture stdout+stderr explicitly so we can surface appimagetool's
         // real error message - inheritIO() under Gradle can swallow output
         // from short-lived subprocesses on CI.
+        // ARCH=x86_64 is required because appimagetool cannot infer the
+        // target architecture from a jpackage AppDir layout (it expects the
+        // binaries under usr/bin/, but our launcher lives at kotomemo/bin/).
         val proc = ProcessBuilder(
             appimagetool.get().asFile.absolutePath,
             "--appimage-extract-and-run",
             appDir.absolutePath,
             out.absolutePath,
-        ).redirectErrorStream(true).start()
+        ).redirectErrorStream(true)
+            .apply { environment()["ARCH"] = "x86_64" }
+            .start()
         val captured = proc.inputStream.bufferedReader().readText()
         val exit = proc.waitFor()
         logger.lifecycle("appimagetool output:\n$captured")
