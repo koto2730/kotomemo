@@ -115,6 +115,18 @@ fun FrameWindowScope.AppMenuBar(state: EditorState, onExit: () -> Unit) {
         }
         Menu("Send", mnemonic = 'S') {
             val presets = state.appConfig.presets
+            // Ctrl+; opens the SendPaletteDialog: a quick command-palette
+            // style picker showing every preset with a number prefix so the
+            // first ten can be fired by pressing 1-9 or 0 (10th). Listed
+            // before the per-preset items so it sits near the top of the
+            // menu.
+            Item(
+                "Send palette…",
+                shortcut = KeyShortcut(Key.Semicolon, ctrl = true),
+                enabled = !state.sendBusy,
+                onClick = { state.sendPaletteOpen = true },
+            )
+            Separator()
             if (presets.isEmpty()) {
                 Item("(no presets)", enabled = false, onClick = {})
             } else {
