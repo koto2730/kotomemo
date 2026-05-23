@@ -79,9 +79,16 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          # upload-artifact@v4 preserves the input path's directory layout,
+          # so artifacts/kotomemo-windows/ contains portable/kotomemo-portable.exe
+          # and compose/binaries/main/msi/*.msi (nested). A flat glob like
+          # artifacts/*/* picks up directories. Use find to collect actual
+          # files at any depth.
+          mapfile -t files < <(find artifacts -type f)
+          printf 'Attaching: %s\n' "${files[@]}"
           gh release create "${{ github.ref_name }}" \
             --draft \
             --title "${{ github.ref_name }}" \
             --generate-notes \
             --repo "${{ github.repository }}" \
-            artifacts/*/*
+            "${files[@]}"
