@@ -104,9 +104,11 @@ compose.desktop {
             }
             macOS {
                 bundleID = "com.ictglabo.kotomemo"
-                // TODO: provide assets/icon.icns once a Mac is available to run
-                //   iconutil -c icns assets/icon.iconset
-                // (jpackage requires .icns on macOS; .png/.ico are not accepted.)
+                // The .icns file is generated at build time by the
+                // prepareIcns task (defined below). On non-macOS hosts the
+                // task is skipped and this iconFile is irrelevant because
+                // jpackage's macOS path does not run there.
+                iconFile.set(layout.buildDirectory.file("icns/icon.icns"))
             }
             linux {
                 debMaintainer = "ictglabo"
@@ -395,4 +397,99 @@ val packageAppImage by tasks.registering {
 
         logger.lifecycle("final AppImage: ${out.length() / 1024 / 1024} MB")
     }
+}
+
+// ---------------------------------------------------------------------------
+// macOS .icns generation from assets/icon.png.
+//
+// jpackage on macOS requires an .icns icon file - it rejects the .png/.ico
+// formats accepted on Linux/Windows. Apple's iconutil + sips, both shipped
+// with macOS, do the conversion natively, so this runs on developer Macs and
+// the GitHub Actions macos-latest runner without extra installs.
+//
+// onlyIf macOS keeps cross-platform invocations clean: on Windows/Linux the
+// task is skipped, downstream tasks (createDistributable, packageDmg) keep
+// running because the macOS jpackage path is not exercised there anyway.
+// ---------------------------------------------------------------------------
+
+val prepareIcns by tasks.registering {
+    group = "compose desktop"
+    description = "Generate build/icns/icon.icns from assets/icon.png via sips + iconutil (macOS only)."
+
+    val sourcePng = rootProject.file("assets/icon.png")
+    val iconsetDir = layout.buildDirectory.dir("icns/icon.iconset")
+    val outputFile = layout.buildDirectory.file("icns/icon.icns")
+
+    inputs.file(sourcePng)
+    outputs.file(outputFile)
+    outputs.dir(iconsetDir)
+
+    onlyIf {
+        val osName = System.getProperty("os.name").lowercase()
+        val isMac = osName.contains("mac") || osName.contains("darwin")
+        if (!isMac) {
+            logger.lifecycle("Skipping prepareIcns: requires macOS (current os.name: $osName)")
+        }
+        isMac
+    }
+
+    doLast {
+        val src = sourcePng.absolutePath
+        val iconset = iconsetDir.get().asFile
+        val outFile = outputFile.get().asFile
+
+        // Rebuild the iconset directory each run so a stale resize from a
+        // previous icon.png cannot leak into the .icns.
+        if (iconset.exists()) iconset.deleteRecursively()
+        iconset.mkdirs()
+        outFile.parentFile.mkdirs()
+
+        // Apple's standard icns content set. Format: (pixel size, name).
+        // The @2x variants are the same pixel size as the next slot up but
+        // are mapped to the smaller logical size for HiDPI rendering.
+        val sizes = listOf(
+            16 to "icon_16x16.png",
+            32 to "icon_16x16@2x.png",
+            32 to "icon_32x32.png",
+            64 to "icon_32x32@2x.png",
+            128 to "icon_128x128.png",
+            256 to "icon_128x128@2x.png",
+            256 to "icon_256x256.png",
+            512 to "icon_256x256@2x.png",
+            512 to "icon_512x512.png",
+            1024 to "icon_512x512@2x.png",
+        )
+
+        for ((size, name) in sizes) {
+            val target = File(iconset, name).absolutePath
+            val proc = ProcessBuilder(
+                "sips", "-z", "$size", "$size", src, "--out", target,
+            ).redirectErrorStream(true).start()
+            val captured = proc.inputStream.bufferedReader().readText()
+            val exit = proc.waitFor()
+            if (exit != 0) {
+                throw GradleException("sips failed for $name (exit $exit):\n$captured")
+            }
+        }
+
+        val proc = ProcessBuilder(
+            "iconutil", "-c", "icns", iconset.absolutePath, "-o", outFile.absolutePath,
+        ).redirectErrorStream(true).start()
+        val captured = proc.inputStream.bufferedReader().readText()
+        val exit = proc.waitFor()
+        if (exit != 0) throw GradleException("iconutil failed (exit $exit):\n$captured")
+
+        logger.lifecycle("generated ${outFile.name} (${outFile.length() / 1024} KB)")
+    }
+}
+
+// Wire prepareIcns into the macOS packaging path. On non-macOS hosts
+// prepareIcns is SKIPPED by its onlyIf, so adding the dependency is a no-op
+// there. createDistributable also depends because the macOS .app bundle
+// (used by packageDmg AND runDistributable) embeds the icon at app-image
+// time, not at .dmg wrap time. Use tasks.matching so this works regardless
+// of the Compose Desktop plugin's task registration order.
+val icnsConsumerNames = setOf("createDistributable", "packageDmg", "packageReleaseDmg")
+tasks.matching { it.name in icnsConsumerNames }.configureEach {
+    dependsOn(prepareIcns)
 }
