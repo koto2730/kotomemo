@@ -40,10 +40,18 @@ class TabState(initial: Contents) {
     }
 
     fun replaceContents(newContents: Contents) {
+        // Save reuses this with identical text just to refresh isDirty and
+        // path metadata. Rebuilding fieldValue from scratch in that case
+        // discards the user's cursor/selection (TextFieldValue(text) defaults
+        // to TextRange.Zero), which makes BasicTextField's internal
+        // scroll-to-caret snap the view to the top after every save.
+        val sameText = newContents.text == fieldValue.text
         contents = newContents
-        fieldValue = TextFieldValue(newContents.text)
-        undoStack.clear()
-        redoStack.clear()
+        if (!sameText) {
+            fieldValue = TextFieldValue(newContents.text)
+            undoStack.clear()
+            redoStack.clear()
+        }
     }
 
     fun canUndo(): Boolean = undoStack.isNotEmpty()
