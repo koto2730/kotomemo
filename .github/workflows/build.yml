@@ -37,7 +37,11 @@ jobs:
             label: macos-arm64
             packageTasks: ":composeApp:packageDmg"
             artifactPath: composeApp/build/compose/binaries/main/dmg/*.dmg
-          - os: ubuntu-latest
+          # Pin to 22.04 (glibc 2.35) so the AppImage stays compatible with
+          # Ubuntu 22.04 LTS, Debian 12, Fedora 38+ and the rolling distros.
+          # ubuntu-latest = 24.04 = glibc 2.39 would silently raise the
+          # required-glibc floor on every runner image bump.
+          - os: ubuntu-22.04
             label: linux
             packageTasks: ":composeApp:packageAppImage"
             artifactPath: composeApp/build/portable/kotomemo-*-x86_64.AppImage
