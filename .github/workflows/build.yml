@@ -37,7 +37,11 @@ jobs:
             label: macos-arm64
             packageTasks: ":composeApp:packageDmg"
             artifactPath: composeApp/build/compose/binaries/main/dmg/*.dmg
-          - os: ubuntu-latest
+          # Pin to 22.04 (glibc 2.35) so the AppImage stays compatible with
+          # Ubuntu 22.04 LTS, Debian 12, Fedora 38+ and the rolling distros.
+          # ubuntu-latest = 24.04 = glibc 2.39 would silently raise the
+          # required-glibc floor on every runner image bump.
+          - os: ubuntu-22.04
             label: linux
             packageTasks: ":composeApp:packageAppImage"
             artifactPath: composeApp/build/portable/kotomemo-*-x86_64.AppImage
@@ -50,6 +54,15 @@ jobs:
         shell: bash
     steps:
       - uses: actions/checkout@v4
+
+      # The ubuntu-22.04 runner ships JDK 11 as default. Gradle 8.x +
+      # Kotlin 2.x require JDK 17+ just to start. Pin 21 (Temurin) on
+      # every OS so the Gradle daemon is always recent enough. Project
+      # toolchains are still resolved separately by Foojay.
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
 
       - uses: gradle/actions/setup-gradle@v4
 
