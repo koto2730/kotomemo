@@ -25,7 +25,7 @@ jobs:
             label: windows
             packageTasks: ":composeApp:packagePortableExe :composeApp:packageMsi"
             artifactPath: |
-              composeApp/build/portable/kotomemo-portable.exe
+              composeApp/build/portable/kotomemo-*-portable.exe
               composeApp/build/compose/binaries/main/msi/*.msi
           - os: macos-latest
             label: macos-arm64
@@ -34,7 +34,7 @@ jobs:
           - os: ubuntu-latest
             label: linux
             packageTasks: ":composeApp:packageAppImage"
-            artifactPath: composeApp/build/portable/kotomemo-x86_64.AppImage
+            artifactPath: composeApp/build/portable/kotomemo-*-x86_64.AppImage
     runs-on: ${{ matrix.os }}
     defaults:
       run:
@@ -44,8 +44,14 @@ jobs:
 
       - uses: gradle/actions/setup-gradle@v4
 
+      # Strip the leading "v" from the pushed tag (v0.0.1 -> 0.0.1) and pass
+      # it as a Gradle property so MSI/DMG packageVersion and the portable
+      # exe / AppImage filenames all align with the Release tag.
       - name: Tests + packaging
-        run: ./gradlew :composeApp:jvmTest ${{ matrix.packageTasks }} --stacktrace
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          echo "Building artifacts for version: $VERSION"
+          ./gradlew :composeApp:jvmTest ${{ matrix.packageTasks }} -PappVersion="$VERSION" --stacktrace
 
       - uses: actions/upload-artifact@v4
         with:

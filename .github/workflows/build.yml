@@ -31,7 +31,7 @@ jobs:
             label: windows
             packageTasks: ":composeApp:packagePortableExe :composeApp:packageMsi"
             artifactPath: |
-              composeApp/build/portable/kotomemo-portable.exe
+              composeApp/build/portable/kotomemo-*-portable.exe
               composeApp/build/compose/binaries/main/msi/*.msi
           - os: macos-latest
             label: macos-arm64
@@ -40,7 +40,7 @@ jobs:
           - os: ubuntu-latest
             label: linux
             packageTasks: ":composeApp:packageAppImage"
-            artifactPath: composeApp/build/portable/kotomemo-x86_64.AppImage
+            artifactPath: composeApp/build/portable/kotomemo-*-x86_64.AppImage
     runs-on: ${{ matrix.os }}
     defaults:
       run:

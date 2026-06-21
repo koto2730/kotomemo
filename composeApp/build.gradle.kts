@@ -41,6 +41,28 @@ kotlin {
 }
 
 
+// Application version, sourced from the Gradle property `appVersion`
+// (passed by release.yml from the pushed tag, e.g. -PappVersion=0.0.1).
+// Local dev builds without the property fall back to the dev placeholder.
+//
+// jpackage requires `packageVersion` in strict n.n.n / n.n.n.n form. It
+// also rejects MAJOR == 0 (see "Correct format: MAJOR[.MINOR][.PATCH]
+// where MAJOR is an integer > 0"), so for pre-1.0 tags like v0.0.x we
+// bump the major from 0 to 1 in the jpackage version. The original full
+// version (including any -test / -rc / -dev suffix) is still used for
+// the portable .exe and AppImage filenames and remains the GitHub
+// Release tag, so test releases stay distinguishable.
+val appVersion = (findProperty("appVersion") as? String) ?: "0.0.0-dev"
+val jpackageSafeVersion = run {
+    val stripped = appVersion.substringBefore('-').ifEmpty { "0.0.0" }
+    val parts = stripped.split('.')
+    val major = parts.getOrNull(0)?.toIntOrNull() ?: 0
+    val minor = parts.getOrNull(1)?.toIntOrNull() ?: 0
+    val patch = parts.getOrNull(2)?.toIntOrNull() ?: 0
+    if (major == 0) "1.$minor.$patch" else stripped
+}
+logger.lifecycle("appVersion=$appVersion, jpackage packageVersion=$jpackageSafeVersion")
+
 // Resolve the GraalVM 21 toolchain so the Kotlin compiler / tests run on it
 // regardless of JAVA_HOME. Phase 5c (Native Image) will lean on this.
 val graal21Launcher = javaToolchains.launcherFor {
@@ -68,7 +90,7 @@ compose.desktop {
         nativeDistributions {
             targetFormats(TargetFormat.Dmg, TargetFormat.Msi, TargetFormat.Deb)
             packageName = "kotomemo"
-            packageVersion = "1.0.0"
+            packageVersion = jpackageSafeVersion
             description = "kotomemo - a Notepad-style editor."
             vendor = "ictglabo"
 
@@ -181,7 +203,7 @@ val packagePortableExe by tasks.registering {
     dependsOn("createDistributable", downloadWarpPacker, downloadRcedit)
 
     val appImageDir = layout.buildDirectory.dir("compose/binaries/main/app/kotomemo")
-    val outputFile = layout.buildDirectory.file("portable/kotomemo-portable.exe")
+    val outputFile = layout.buildDirectory.file("portable/kotomemo-$appVersion-portable.exe")
     val warpPacker = layout.buildDirectory.file(warpPackerRelativePath)
     val rcedit = layout.buildDirectory.file(rceditRelativePath)
     val iconFile = rootProject.file("assets/icon.ico")
@@ -313,7 +335,7 @@ val packageAppImage by tasks.registering {
 
     val appImageDir = layout.buildDirectory.dir("compose/binaries/main/app/kotomemo")
     val appDirRoot = layout.buildDirectory.dir("appimage/kotomemo.AppDir")
-    val outputFile = layout.buildDirectory.file("portable/kotomemo-x86_64.AppImage")
+    val outputFile = layout.buildDirectory.file("portable/kotomemo-$appVersion-x86_64.AppImage")
     val appimagetool = layout.buildDirectory.file(appimagetoolRelativePath)
     val iconFile = rootProject.file("assets/icon.png")
 
