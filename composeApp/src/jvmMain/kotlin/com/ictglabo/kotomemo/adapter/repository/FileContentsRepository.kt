@@ -14,13 +14,19 @@ class FileContentsRepository(
     override fun load(path: Path): Contents {
         val raw = fileManager.readBytes(path)
         val (charset, hasBom) = fileManager.detectEncoding(raw)
-        val text = fileManager.decode(raw, charset, hasBom)
+        val rawText = fileManager.decode(raw, charset, hasBom)
+        // The buffer is always logical LF. CR is normalised away on load so
+        // line-ending mode stays purely a save-time metadata choice. Detect
+        // the original line ending before normalisation so the metadata
+        // survives a round-trip.
+        val lineEnding = LineEnding.detect(rawText)
+        val normalized = rawText.replace("\r\n", "\n").replace("\r", "\n")
         return Contents(
             id = ContentsId.generate(),
-            text = text,
+            text = normalized,
             filePath = path,
             charset = charset,
-            lineEnding = LineEnding.detect(text),
+            lineEnding = lineEnding,
             hasBom = hasBom,
             isDirty = false,
         )

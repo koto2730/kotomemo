@@ -27,7 +27,7 @@ fun StatusBar(state: EditorState) {
             Text("—", style = MaterialTheme.typography.bodySmall)
             return@Row
         }
-        val pos = CursorPosition.of(tab.fieldValue.text, tab.fieldValue.selection.start)
+        val pos = CursorPosition.of(tab.text, tab.selection.start)
         Text("Ln ${pos.line}, Col ${pos.column}", style = MaterialTheme.typography.bodySmall)
         Text(tab.contents.charset.name(), style = MaterialTheme.typography.bodySmall)
         Text(tab.contents.lineEnding.name, style = MaterialTheme.typography.bodySmall)

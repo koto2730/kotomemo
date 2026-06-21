@@ -1,14 +1,19 @@
 package com.ictglabo.kotomemo.framework.ui
 
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.text.input.TextFieldLineLimits
 import androidx.compose.material3.LocalTextStyle
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.input.key.Key
@@ -18,8 +23,8 @@ import androidx.compose.ui.input.key.isShiftPressed
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
+import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextRange
-import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.ictglabo.kotomemo.usecase.HighlightCommand
@@ -32,66 +37,88 @@ fun EditorPane(state: EditorState, tab: TabState?) {
             Text("No tab", style = MaterialTheme.typography.bodyMedium)
             return@Box
         }
-        val text = tab.fieldValue.text
+        // Reading tab.text registers a snapshot read on textState.text, so
+        // any edit (user typing, undo, programmatic setText) triggers a
+        // recompose here and refreshes the highlight tokens.
+        val text = tab.text
         val path = tab.contents.filePath
-        val transformation = remember(text, path) {
+        // Faint colour used to render whitespace-marker glyphs (e.g. the
+        // arrow we substitute for \t). 0.45 alpha gives "visible but
+        // de-emphasised" against both light and dark themes.
+        val controlCharColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.45f)
+        val transformation = remember(text, path, controlCharColor) {
             val ruleSet = SyntaxRuleRegistry.rulesFor(path)
             val tokens = HighlightCommand().execute(HighlightCommand.Input(text, ruleSet))
-            HighlightTransformation(tokens)
+            HighlightOutputTransformation(tokens, SpanStyle(color = controlCharColor))
         }
-        // Don't wrap BasicTextField in Modifier.verticalScroll. It has its own
-        // internal scrolling for multi-line content that auto-follows the
-        // caret on Enter and survives focus changes; an outer scroll fights
-        // with that and produces "Enter doesn't scroll" plus "click jumps
-        // back to top" bugs.
-        BasicTextField(
-            value = tab.fieldValue,
-            onValueChange = tab::applyText,
-            modifier = Modifier
-                .fillMaxSize()
-                .onPreviewKeyEvent { event ->
-                    if (event.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
-                    when {
-                        event.isCtrlPressed && event.key == Key.H -> {
-                            state.finder.toggleReplace()
-                            true
-                        }
-                        event.isCtrlPressed && event.key == Key.F -> {
-                            state.finder.toggleFind()
-                            true
-                        }
-                        // Accept Ctrl+= as an alternative Zoom In on US
-                        // layouts where '=' is its own key. JIS users get the
-                        // same effect via Ctrl+Shift+- registered on the menu.
-                        event.isCtrlPressed && event.key == Key.Equals -> {
-                            state.zoomIn()
-                            true
-                        }
-                        event.key == Key.Tab -> handleTab(tab, state, outdent = event.isShiftPressed)
-                        else -> false
+
+        // The new BasicTextField API has no onValueChange callback - the
+        // TextFieldState is mutated directly by the field. To keep
+        // Contents.isDirty / Contents.text in sync with what the user is
+        // typing, we observe textState.text and mirror it into contents.
+        LaunchedEffect(tab) {
+            snapshotFlow { tab.textState.text.toString() }
+                .collect { newText ->
+                    if (newText != tab.contents.text) {
+                        tab.contents = tab.contents.copy(text = newText, isDirty = true)
                     }
-                },
-            textStyle = LocalTextStyle.current.copy(
-                fontFamily = state.editorFont.toFontFamily(),
-                fontSize = state.effectiveFontSize.sp,
-                color = MaterialTheme.colorScheme.onSurface,
-            ),
-            cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
-            visualTransformation = transformation,
-        )
+                }
+        }
+
+        Row(modifier = Modifier.fillMaxSize()) {
+            if (state.showLineNumbers) {
+                LineNumberGutter(tab, fontSize = state.effectiveFontSize)
+            }
+            BasicTextField(
+                state = tab.textState,
+                modifier = Modifier
+                    .fillMaxHeight()
+                    .weight(1f)
+                    .onPreviewKeyEvent { event ->
+                        if (event.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
+                        when {
+                            event.isCtrlPressed && event.key == Key.H -> {
+                                state.finder.toggleReplace()
+                                true
+                            }
+                            event.isCtrlPressed && event.key == Key.F -> {
+                                state.finder.toggleFind()
+                                true
+                            }
+                            // Accept Ctrl+= as an alternative Zoom In on US
+                            // layouts where '=' is its own key. JIS users get the
+                            // same effect via Ctrl+Shift+- registered on the menu.
+                            event.isCtrlPressed && event.key == Key.Equals -> {
+                                state.zoomIn()
+                                true
+                            }
+                            event.key == Key.Tab -> handleTab(tab, state, outdent = event.isShiftPressed)
+                            else -> false
+                        }
+                    },
+                textStyle = LocalTextStyle.current.copy(
+                    fontFamily = state.editorFont.toFontFamily(),
+                    fontSize = state.effectiveFontSize.sp,
+                    color = MaterialTheme.colorScheme.onSurface,
+                ),
+                cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
+                lineLimits = TextFieldLineLimits.MultiLine(),
+                outputTransformation = transformation,
+                scrollState = tab.scrollState,
+            )
+        }
     }
 }
 
 private fun handleTab(tab: TabState, state: EditorState, outdent: Boolean): Boolean {
-    val sel = tab.fieldValue.selection
-    val multiLine = !sel.collapsed &&
-        tab.fieldValue.text.substring(sel.min, sel.max).contains('\n')
+    val sel = tab.selection
+    val text = tab.text
+    val multiLine = !sel.collapsed && text.substring(sel.min, sel.max).contains('\n')
     return if (multiLine) {
         state.bulkIndent(outdent)
     } else if (!outdent) {
-        val text = tab.fieldValue.text
         val newText = text.substring(0, sel.min) + "\t" + text.substring(sel.max)
-        tab.applyText(TextFieldValue(newText, TextRange(sel.min + 1)))
+        tab.setText(newText, TextRange(sel.min + 1))
         true
     } else {
         false

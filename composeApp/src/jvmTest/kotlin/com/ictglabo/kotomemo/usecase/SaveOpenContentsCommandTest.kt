@@ -76,4 +76,28 @@ class SaveOpenContentsCommandTest {
         assertEquals("", c.text)
         assertEquals(Contents.UNTITLED, c.displayName)
     }
+
+    @Test
+    fun `open CRLF file normalises buffer to LF but keeps CRLF metadata`() {
+        tmp = Files.createTempFile("kotomemo-test-", ".txt")
+        Files.write(tmp, "a\r\nb\r\nc".toByteArray(Charsets.UTF_8))
+
+        val loaded = OpenContentsCommand(repo).execute(tmp)
+
+        assertEquals("a\nb\nc", loaded.text)
+        assertEquals(LineEnding.CRLF, loaded.lineEnding)
+    }
+
+    @Test
+    fun `open file with stray CR is normalised to LF`() {
+        tmp = Files.createTempFile("kotomemo-test-", ".txt")
+        Files.write(tmp, "a\rb\rc".toByteArray(Charsets.UTF_8))
+
+        val loaded = OpenContentsCommand(repo).execute(tmp)
+
+        assertEquals("a\nb\nc", loaded.text)
+        // Bare CR (legacy Mac Classic) is detected as LF since detect()
+        // gates on the presence of CRLF.
+        assertEquals(LineEnding.LF, loaded.lineEnding)
+    }
 }
