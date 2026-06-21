@@ -112,6 +112,13 @@ fun FrameWindowScope.AppMenuBar(state: EditorState, onExit: () -> Unit) {
                 shortcut = KeyShortcut(Key.Zero, ctrl = true),
                 onClick = { state.zoomReset() },
             )
+            Separator()
+            CheckboxItem(
+                "Show line numbers",
+                checked = state.showLineNumbers,
+                shortcut = KeyShortcut(Key.L, ctrl = true),
+                onCheckedChange = { state.showLineNumbers = it },
+            )
         }
         Menu("Send", mnemonic = 'S') {
             val presets = state.appConfig.presets

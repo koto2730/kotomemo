@@ -103,6 +103,7 @@ class EditorState(
     var sendStatus by mutableStateOf<String?>(null)
     var presetDialogOpen by mutableStateOf(false)
     var sendPaletteOpen by mutableStateOf(false)
+    var showLineNumbers by mutableStateOf(false)
 
     val effectiveFontSize: Int
         get() = ((editorFont.size * zoomPercent) / 100).coerceAtLeast(EditorFont.MIN_SIZE)
@@ -271,6 +272,10 @@ class EditorState(
     fun zoomIn() { zoomPercent = (zoomPercent + 10).coerceAtMost(500) }
     fun zoomOut() { zoomPercent = (zoomPercent - 10).coerceAtLeast(50) }
     fun zoomReset() { zoomPercent = 100 }
+
+    fun toggleLineNumbers() {
+        showLineNumbers = !showLineNumbers
+    }
 
     fun selectAll() {
         val tab = current ?: return

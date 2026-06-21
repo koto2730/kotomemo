@@ -1,6 +1,8 @@
 package com.ictglabo.kotomemo.framework.ui
 
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.text.BasicTextField
@@ -58,42 +60,48 @@ fun EditorPane(state: EditorState, tab: TabState?) {
                 }
         }
 
-        BasicTextField(
-            state = tab.textState,
-            modifier = Modifier
-                .fillMaxSize()
-                .onPreviewKeyEvent { event ->
-                    if (event.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
-                    when {
-                        event.isCtrlPressed && event.key == Key.H -> {
-                            state.finder.toggleReplace()
-                            true
+        Row(modifier = Modifier.fillMaxSize()) {
+            if (state.showLineNumbers) {
+                LineNumberGutter(tab, fontSize = state.effectiveFontSize)
+            }
+            BasicTextField(
+                state = tab.textState,
+                modifier = Modifier
+                    .fillMaxHeight()
+                    .weight(1f)
+                    .onPreviewKeyEvent { event ->
+                        if (event.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
+                        when {
+                            event.isCtrlPressed && event.key == Key.H -> {
+                                state.finder.toggleReplace()
+                                true
+                            }
+                            event.isCtrlPressed && event.key == Key.F -> {
+                                state.finder.toggleFind()
+                                true
+                            }
+                            // Accept Ctrl+= as an alternative Zoom In on US
+                            // layouts where '=' is its own key. JIS users get the
+                            // same effect via Ctrl+Shift+- registered on the menu.
+                            event.isCtrlPressed && event.key == Key.Equals -> {
+                                state.zoomIn()
+                                true
+                            }
+                            event.key == Key.Tab -> handleTab(tab, state, outdent = event.isShiftPressed)
+                            else -> false
                         }
-                        event.isCtrlPressed && event.key == Key.F -> {
-                            state.finder.toggleFind()
-                            true
-                        }
-                        // Accept Ctrl+= as an alternative Zoom In on US
-                        // layouts where '=' is its own key. JIS users get the
-                        // same effect via Ctrl+Shift+- registered on the menu.
-                        event.isCtrlPressed && event.key == Key.Equals -> {
-                            state.zoomIn()
-                            true
-                        }
-                        event.key == Key.Tab -> handleTab(tab, state, outdent = event.isShiftPressed)
-                        else -> false
-                    }
-                },
-            textStyle = LocalTextStyle.current.copy(
-                fontFamily = state.editorFont.toFontFamily(),
-                fontSize = state.effectiveFontSize.sp,
-                color = MaterialTheme.colorScheme.onSurface,
-            ),
-            cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
-            lineLimits = TextFieldLineLimits.MultiLine(),
-            outputTransformation = transformation,
-            scrollState = tab.scrollState,
-        )
+                    },
+                textStyle = LocalTextStyle.current.copy(
+                    fontFamily = state.editorFont.toFontFamily(),
+                    fontSize = state.effectiveFontSize.sp,
+                    color = MaterialTheme.colorScheme.onSurface,
+                ),
+                cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
+                lineLimits = TextFieldLineLimits.MultiLine(),
+                outputTransformation = transformation,
+                scrollState = tab.scrollState,
+            )
+        }
     }
 }
 
