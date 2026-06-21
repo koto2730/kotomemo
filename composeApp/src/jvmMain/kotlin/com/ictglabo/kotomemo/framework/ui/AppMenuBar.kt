@@ -34,7 +34,7 @@ fun FrameWindowScope.AppMenuBar(state: EditorState, onExit: () -> Unit) {
                     if (tab.contents.filePath != null) {
                         state.saveCurrent()
                     } else {
-                        val suggested = SuggestedFilename.from(tab.fieldValue.text)
+                        val suggested = SuggestedFilename.from(tab.text)
                         FileDialogs.saveFile(parentFrame, suggestedName = suggested)
                             ?.let { state.saveCurrent(it) }
                     }
@@ -46,7 +46,7 @@ fun FrameWindowScope.AppMenuBar(state: EditorState, onExit: () -> Unit) {
                 onClick = {
                     val tab = state.current ?: return@Item
                     val suggested = tab.contents.filePath?.fileName?.toString()
-                        ?: SuggestedFilename.from(tab.fieldValue.text)
+                        ?: SuggestedFilename.from(tab.text)
                     FileDialogs.saveFile(parentFrame, suggestedName = suggested)
                         ?.let { state.saveCurrent(it) }
                 },
