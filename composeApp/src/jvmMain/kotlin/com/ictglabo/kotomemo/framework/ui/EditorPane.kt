@@ -23,6 +23,7 @@ import androidx.compose.ui.input.key.isShiftPressed
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
+import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -41,10 +42,14 @@ fun EditorPane(state: EditorState, tab: TabState?) {
         // recompose here and refreshes the highlight tokens.
         val text = tab.text
         val path = tab.contents.filePath
-        val transformation = remember(text, path) {
+        // Faint colour used to render whitespace-marker glyphs (e.g. the
+        // arrow we substitute for \t). 0.45 alpha gives "visible but
+        // de-emphasised" against both light and dark themes.
+        val controlCharColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.45f)
+        val transformation = remember(text, path, controlCharColor) {
             val ruleSet = SyntaxRuleRegistry.rulesFor(path)
             val tokens = HighlightCommand().execute(HighlightCommand.Input(text, ruleSet))
-            HighlightOutputTransformation(tokens)
+            HighlightOutputTransformation(tokens, SpanStyle(color = controlCharColor))
         }
 
         // The new BasicTextField API has no onValueChange callback - the

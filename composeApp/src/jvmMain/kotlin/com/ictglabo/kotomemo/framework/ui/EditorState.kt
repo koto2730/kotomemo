@@ -175,14 +175,17 @@ class EditorState(
 
     private fun insertAfterSelection(selStart: Int, selEnd: Int, response: String) {
         val tab = current ?: return
+        // HTTP responses often arrive with CRLF (servers default to it).
+        // Normalise to LF so the buffer invariant (logical LF only) holds.
+        val normalizedResponse = response.replace("\r\n", "\n").replace("\r", "\n")
         val text = tab.text
         val end = selEnd.coerceIn(0, text.length)
         // ensure we land at the start of the next line: insert a newline if needed
         val needsNewlineBefore = end > 0 && text[end - 1] != '\n'
-        val needsNewlineAfter = !response.endsWith('\n')
+        val needsNewlineAfter = !normalizedResponse.endsWith('\n')
         val payload = buildString {
             if (needsNewlineBefore) append('\n')
-            append(response)
+            append(normalizedResponse)
             if (needsNewlineAfter) append('\n')
         }
         val newText = text.substring(0, end) + payload + text.substring(end)
@@ -301,7 +304,12 @@ class EditorState(
 
     fun pasteAtCursor() {
         val tab = current ?: return
-        val payload = ClipboardBridge.paste() ?: return
+        // Windows clipboard hands us CRLF line breaks. Normalise to LF so
+        // the buffer's invariant ("logical LF only") survives a paste.
+        val payload = ClipboardBridge.paste()
+            ?.replace("\r\n", "\n")
+            ?.replace("\r", "\n")
+            ?: return
         val sel = tab.selection
         val text = tab.text
         val newText = text.substring(0, sel.min) + payload + text.substring(sel.max)
