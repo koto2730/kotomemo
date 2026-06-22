@@ -1,20 +1,18 @@
 package com.ictglabo.kotomemo.framework.ui
 
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.text.BasicTextField
-import androidx.compose.foundation.text.input.TextFieldLineLimits
 import androidx.compose.material3.LocalTextStyle
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
@@ -25,11 +23,26 @@ import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextRange
+import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.ictglabo.kotomemo.usecase.HighlightCommand
 import com.ictglabo.kotomemo.usecase.SyntaxRuleRegistry
 
+/**
+ * Editor pane using the *legacy* BasicTextField overload (value +
+ * onValueChange). We tried the modern state-based overload in PR #7 but
+ * it broke IME composition on desktop in Compose Multiplatform 1.10.x
+ * (Japanese conversion, NSTextInputClient on macOS, TSF on Windows -
+ * all funnelled through the same broken path) and also dropped chars
+ * mid-input. Until the new API's desktop IME story matures upstream,
+ * stay on the legacy overload.
+ *
+ * Trade-off: no externally observable scroll state, so we lose the
+ * gutter scroll-sync and need to leave BasicTextField's internal
+ * scroller alone (no Modifier.verticalScroll wrap - that wrap was the
+ * root cause of the original click-jump-to-top bug).
+ */
 @Composable
 fun EditorPane(state: EditorState, tab: TabState?) {
     Box(modifier = Modifier.fillMaxSize().padding(8.dp)) {
@@ -37,88 +50,80 @@ fun EditorPane(state: EditorState, tab: TabState?) {
             Text("No tab", style = MaterialTheme.typography.bodyMedium)
             return@Box
         }
-        // Reading tab.text registers a snapshot read on textState.text, so
-        // any edit (user typing, undo, programmatic setText) triggers a
-        // recompose here and refreshes the highlight tokens.
-        val text = tab.text
+        val text = tab.fieldValue.text
         val path = tab.contents.filePath
-        // Faint colour used to render whitespace-marker glyphs (e.g. the
-        // arrow we substitute for \t). 0.45 alpha gives "visible but
-        // de-emphasised" against both light and dark themes.
+        // Faint colour used to render whitespace-marker glyphs (the arrow
+        // we substitute for \t and the Control Pictures we substitute for
+        // other C0 controls). 0.45 alpha is "visible but de-emphasised"
+        // against both light and dark themes.
         val controlCharColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.45f)
         val transformation = remember(text, path, controlCharColor) {
             val ruleSet = SyntaxRuleRegistry.rulesFor(path)
             val tokens = HighlightCommand().execute(HighlightCommand.Input(text, ruleSet))
-            HighlightOutputTransformation(tokens, SpanStyle(color = controlCharColor))
+            HighlightTransformation(tokens, SpanStyle(color = controlCharColor))
         }
-
-        // The new BasicTextField API has no onValueChange callback - the
-        // TextFieldState is mutated directly by the field. To keep
-        // Contents.isDirty / Contents.text in sync with what the user is
-        // typing, we observe textState.text and mirror it into contents.
+        // Pull focus into the field whenever the active tab switches (incl.
+        // first mount on file open). Without this BasicTextField stays
+        // unfocused after a file load, so the user's first click - which
+        // happens after they wheel-scrolled to find an edit position -
+        // triggers the field's initial focus-gain, and the internal
+        // scroll-to-caret runs against caret position 0, snapping the
+        // view to the top. Forcing focus up-front keeps the caret "alive"
+        // so wheel-scroll and subsequent clicks behave naturally.
+        val focusRequester = remember(tab) { FocusRequester() }
         LaunchedEffect(tab) {
-            snapshotFlow { tab.textState.text.toString() }
-                .collect { newText ->
-                    if (newText != tab.contents.text) {
-                        tab.contents = tab.contents.copy(text = newText, isDirty = true)
-                    }
-                }
+            runCatching { focusRequester.requestFocus() }
         }
-
-        Row(modifier = Modifier.fillMaxSize()) {
-            if (state.showLineNumbers) {
-                LineNumberGutter(tab, fontSize = state.effectiveFontSize)
-            }
-            BasicTextField(
-                state = tab.textState,
-                modifier = Modifier
-                    .fillMaxHeight()
-                    .weight(1f)
-                    .onPreviewKeyEvent { event ->
-                        if (event.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
-                        when {
-                            event.isCtrlPressed && event.key == Key.H -> {
-                                state.finder.toggleReplace()
-                                true
-                            }
-                            event.isCtrlPressed && event.key == Key.F -> {
-                                state.finder.toggleFind()
-                                true
-                            }
-                            // Accept Ctrl+= as an alternative Zoom In on US
-                            // layouts where '=' is its own key. JIS users get the
-                            // same effect via Ctrl+Shift+- registered on the menu.
-                            event.isCtrlPressed && event.key == Key.Equals -> {
-                                state.zoomIn()
-                                true
-                            }
-                            event.key == Key.Tab -> handleTab(tab, state, outdent = event.isShiftPressed)
-                            else -> false
+        BasicTextField(
+            value = tab.fieldValue,
+            onValueChange = tab::applyText,
+            modifier = Modifier
+                .fillMaxSize()
+                .focusRequester(focusRequester)
+                .onPreviewKeyEvent { event ->
+                    if (event.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
+                    when {
+                        event.isCtrlPressed && event.key == Key.H -> {
+                            state.finder.toggleReplace()
+                            true
                         }
-                    },
-                textStyle = LocalTextStyle.current.copy(
-                    fontFamily = state.editorFont.toFontFamily(),
-                    fontSize = state.effectiveFontSize.sp,
-                    color = MaterialTheme.colorScheme.onSurface,
-                ),
-                cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
-                lineLimits = TextFieldLineLimits.MultiLine(),
-                outputTransformation = transformation,
-                scrollState = tab.scrollState,
-            )
-        }
+                        event.isCtrlPressed && event.key == Key.F -> {
+                            state.finder.toggleFind()
+                            true
+                        }
+                        // Accept Ctrl+= as an alternative Zoom In on US
+                        // layouts where '=' is its own key. JIS users get
+                        // the same effect via Ctrl+Shift+- registered on
+                        // the menu.
+                        event.isCtrlPressed && event.key == Key.Equals -> {
+                            state.zoomIn()
+                            true
+                        }
+                        event.key == Key.Tab -> handleTab(tab, state, outdent = event.isShiftPressed)
+                        else -> false
+                    }
+                },
+            textStyle = LocalTextStyle.current.copy(
+                fontFamily = state.editorFont.toFontFamily(),
+                fontSize = state.effectiveFontSize.sp,
+                color = MaterialTheme.colorScheme.onSurface,
+            ),
+            cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
+            visualTransformation = transformation,
+        )
     }
 }
 
 private fun handleTab(tab: TabState, state: EditorState, outdent: Boolean): Boolean {
-    val sel = tab.selection
-    val text = tab.text
-    val multiLine = !sel.collapsed && text.substring(sel.min, sel.max).contains('\n')
+    val sel = tab.fieldValue.selection
+    val multiLine = !sel.collapsed &&
+        tab.fieldValue.text.substring(sel.min, sel.max).contains('\n')
     return if (multiLine) {
         state.bulkIndent(outdent)
     } else if (!outdent) {
+        val text = tab.fieldValue.text
         val newText = text.substring(0, sel.min) + "\t" + text.substring(sel.max)
-        tab.setText(newText, TextRange(sel.min + 1))
+        tab.applyText(TextFieldValue(newText, TextRange(sel.min + 1)))
         true
     } else {
         false
