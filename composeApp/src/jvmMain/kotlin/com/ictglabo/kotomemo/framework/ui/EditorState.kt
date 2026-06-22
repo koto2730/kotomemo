@@ -1,15 +1,11 @@
-@file:OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
-
 package com.ictglabo.kotomemo.framework.ui
 
-import androidx.compose.foundation.ExperimentalFoundationApi
-import androidx.compose.foundation.ScrollState
-import androidx.compose.foundation.text.input.TextFieldState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.text.TextRange
+import androidx.compose.ui.text.input.TextFieldValue
 import com.ictglabo.kotomemo.adapter.controller.EditorController
 import com.ictglabo.kotomemo.entity.ApiPreset
 import com.ictglabo.kotomemo.entity.AppConfig
@@ -26,64 +22,63 @@ import java.nio.file.Path
 import kotlin.concurrent.thread
 
 /**
- * Per-tab editor state. The text content lives in a TextFieldState
- * (modern Compose BasicTextField API) so we get:
- *   - built-in undo/redo via textState.undoState
- *   - a shareable ScrollState the gutter and editor can both observe
- *   - cleaner IME handling than the legacy TextFieldValue overload
- *
- * `contents` mirrors the buffer text plus on-disk metadata (charset, line
- * ending, BOM, isDirty, file path). It is kept in sync by EditorPane via
- * a snapshotFlow watching textState.text.
+ * Per-tab editor state. Uses the legacy BasicTextField API (TextFieldValue
+ * + applyText) - the state-based modern API in Compose Multiplatform 1.10
+ * broke desktop IME composition (Japanese conversion, etc.), so we live
+ * on the legacy path until the new API's desktop IME story matures
+ * upstream.
  */
 class TabState(initial: Contents) {
     var contents by mutableStateOf(initial)
-    val textState: TextFieldState = TextFieldState(initial.text)
-    val scrollState: ScrollState = ScrollState(0)
+    var fieldValue by mutableStateOf(TextFieldValue(initial.text))
 
-    /** Convenience reads. Both are observable from composable scopes. */
-    val text: String get() = textState.text.toString()
-    val selection: TextRange get() = textState.selection
+    private val undoStack = ArrayDeque<TextFieldValue>()
+    private val redoStack = ArrayDeque<TextFieldValue>()
+    private val maxHistory = 200
 
-    /** Replace the entire buffer text and position the caret/selection. */
-    fun setText(newText: String, newSelection: TextRange = TextRange.Zero) {
-        textState.edit {
-            replace(0, length, newText)
-            selection = newSelection
+    fun applyText(newValue: TextFieldValue) {
+        if (newValue.text != fieldValue.text) {
+            undoStack.addLast(fieldValue)
+            if (undoStack.size > maxHistory) undoStack.removeFirst()
+            redoStack.clear()
+            contents = contents.withText(newValue.text)
         }
-    }
-
-    /** Move only the selection without touching the text. */
-    fun setSelection(newSelection: TextRange) {
-        textState.edit {
-            selection = newSelection
-        }
+        fieldValue = newValue
     }
 
     /**
-     * Swap the underlying Contents. Saving reuses this with identical text
-     * just to refresh isDirty / path metadata - we preserve the caret in
-     * that case so BasicTextField's internal scroll-to-caret does not snap
-     * the view to the top after every Ctrl+S.
-     *
-     * On a true text change (file open) we replace the buffer text and wipe
-     * undo history so undo cannot rewind across an Open boundary.
+     * Swap the underlying Contents. Save reuses this with identical text
+     * just to refresh isDirty / path metadata - preserve the caret in
+     * that case so BasicTextField's internal scroll-to-caret does not
+     * snap the view to the top after every Ctrl+S.
      */
     fun replaceContents(newContents: Contents) {
-        val sameText = newContents.text == text
+        val sameText = newContents.text == fieldValue.text
         contents = newContents
         if (!sameText) {
-            setText(newContents.text, TextRange.Zero)
-            textState.undoState.clearHistory()
+            fieldValue = TextFieldValue(newContents.text)
+            undoStack.clear()
+            redoStack.clear()
         }
     }
 
+    fun canUndo(): Boolean = undoStack.isNotEmpty()
+    fun canRedo(): Boolean = redoStack.isNotEmpty()
+
     fun undo() {
-        textState.undoState.undo()
+        if (undoStack.isEmpty()) return
+        redoStack.addLast(fieldValue)
+        val prev = undoStack.removeLast()
+        fieldValue = prev
+        contents = contents.copy(text = prev.text, isDirty = true)
     }
 
     fun redo() {
-        textState.undoState.redo()
+        if (redoStack.isEmpty()) return
+        undoStack.addLast(fieldValue)
+        val next = redoStack.removeLast()
+        fieldValue = next
+        contents = contents.copy(text = next.text, isDirty = true)
     }
 }
 
@@ -103,7 +98,6 @@ class EditorState(
     var sendStatus by mutableStateOf<String?>(null)
     var presetDialogOpen by mutableStateOf(false)
     var sendPaletteOpen by mutableStateOf(false)
-    var showLineNumbers by mutableStateOf(false)
 
     val effectiveFontSize: Int
         get() = ((editorFont.size * zoomPercent) / 100).coerceAtLeast(EditorFont.MIN_SIZE)
@@ -127,10 +121,9 @@ class EditorState(
     fun sendWithPreset(preset: ApiPreset) {
         if (sendBusy) return
         val tab = current ?: return
-        val sel = tab.selection
-        val text = tab.text
-        val selectedText = if (sel.collapsed) text
-        else text.substring(sel.min, sel.max)
+        val sel = tab.fieldValue.selection
+        val selectedText = if (sel.collapsed) tab.fieldValue.text
+        else tab.fieldValue.text.substring(sel.min, sel.max)
         val filename = tab.contents.displayName
         sendBusy = true
         sendStatus = "Sending to '${preset.name}'…"
@@ -175,10 +168,10 @@ class EditorState(
 
     private fun insertAfterSelection(selStart: Int, selEnd: Int, response: String) {
         val tab = current ?: return
-        // HTTP responses often arrive with CRLF (servers default to it).
-        // Normalise to LF so the buffer invariant (logical LF only) holds.
+        // HTTP servers default to CRLF. Normalise to LF so the buffer
+        // invariant (logical LF only) holds.
         val normalizedResponse = response.replace("\r\n", "\n").replace("\r", "\n")
-        val text = tab.text
+        val text = tab.fieldValue.text
         val end = selEnd.coerceIn(0, text.length)
         // ensure we land at the start of the next line: insert a newline if needed
         val needsNewlineBefore = end > 0 && text[end - 1] != '\n'
@@ -189,8 +182,8 @@ class EditorState(
             if (needsNewlineAfter) append('\n')
         }
         val newText = text.substring(0, end) + payload + text.substring(end)
-        // Restore the original selection (offsets are unaffected because insertion is to the right of selEnd)
-        tab.setText(newText, TextRange(selStart, selEnd))
+        // Restore the original selection (offsets unaffected because insertion is to the right of selEnd)
+        tab.applyText(TextFieldValue(newText, TextRange(selStart, selEnd)))
     }
 
     fun newTab() {
@@ -230,12 +223,7 @@ class EditorState(
     fun saveCurrent(targetPath: Path? = null) {
         val tab = current ?: return
         val path = targetPath ?: tab.contents.filePath ?: return
-        // tab.contents.text may lag the buffer by a snapshot frame (the
-        // EditorPane LaunchedEffect mirrors textState.text -> contents.text).
-        // Take the buffer text directly so an immediate Ctrl+S after typing
-        // saves what's actually on screen.
-        val toSave = tab.contents.copy(text = tab.text)
-        val saved = controller.save(toSave, path)
+        val saved = controller.save(tab.contents, path)
         tab.replaceContents(saved)
     }
 
@@ -276,59 +264,55 @@ class EditorState(
     fun zoomOut() { zoomPercent = (zoomPercent - 10).coerceAtLeast(50) }
     fun zoomReset() { zoomPercent = 100 }
 
-    fun toggleLineNumbers() {
-        showLineNumbers = !showLineNumbers
-    }
-
     fun selectAll() {
         val tab = current ?: return
-        tab.setSelection(TextRange(0, tab.text.length))
+        val len = tab.fieldValue.text.length
+        tab.fieldValue = tab.fieldValue.copy(selection = TextRange(0, len))
     }
 
     fun copySelection() {
         val tab = current ?: return
-        val sel = tab.selection
+        val sel = tab.fieldValue.selection
         if (sel.collapsed) return
-        ClipboardBridge.copy(tab.text.substring(sel.min, sel.max))
+        ClipboardBridge.copy(tab.fieldValue.text.substring(sel.min, sel.max))
     }
 
     fun cutSelection() {
         val tab = current ?: return
-        val sel = tab.selection
+        val sel = tab.fieldValue.selection
         if (sel.collapsed) return
-        val text = tab.text
+        val text = tab.fieldValue.text
         ClipboardBridge.copy(text.substring(sel.min, sel.max))
         val newText = text.removeRange(sel.min, sel.max)
-        tab.setText(newText, TextRange(sel.min))
+        tab.applyText(TextFieldValue(newText, TextRange(sel.min)))
     }
 
     fun pasteAtCursor() {
         val tab = current ?: return
         // Windows clipboard hands us CRLF line breaks. Normalise to LF so
-        // the buffer's invariant ("logical LF only") survives a paste.
+        // the buffer invariant (logical LF only) survives a paste.
         val payload = ClipboardBridge.paste()
             ?.replace("\r\n", "\n")
             ?.replace("\r", "\n")
             ?: return
-        val sel = tab.selection
-        val text = tab.text
+        val sel = tab.fieldValue.selection
+        val text = tab.fieldValue.text
         val newText = text.substring(0, sel.min) + payload + text.substring(sel.max)
         val cursor = sel.min + payload.length
-        tab.setText(newText, TextRange(cursor))
+        tab.applyText(TextFieldValue(newText, TextRange(cursor)))
     }
 
     fun bulkIndent(outdent: Boolean): Boolean {
         val tab = current ?: return false
-        val sel = tab.selection
-        val text = tab.text
-        if (sel.collapsed || !text.substring(sel.min, sel.max).contains('\n')) {
+        val sel = tab.fieldValue.selection
+        if (sel.collapsed || !tab.fieldValue.text.substring(sel.min, sel.max).contains('\n')) {
             return false
         }
         val mode = if (outdent) BulkIndentCommand.Mode.Outdent else BulkIndentCommand.Mode.Indent
         val r = bulkIndentCommand.execute(
-            BulkIndentCommand.Input(text, sel.min, sel.max, mode),
+            BulkIndentCommand.Input(tab.fieldValue.text, sel.min, sel.max, mode),
         )
-        tab.setText(r.text, TextRange(r.selectionStart, r.selectionEnd))
+        tab.applyText(TextFieldValue(r.text, TextRange(r.selectionStart, r.selectionEnd)))
         return true
     }
 
@@ -336,7 +320,7 @@ class EditorState(
         val tab = current ?: return
         val matches = findMatchesCommand.execute(
             FindMatchesCommand.Input(
-                text = tab.text,
+                text = tab.fieldValue.text,
                 query = finder.query,
                 regex = finder.regex,
                 caseSensitive = finder.caseSensitive,
@@ -348,21 +332,23 @@ class EditorState(
             finder.wrappedAround = false
             return
         }
-        val cursor = tab.selection.max
+        val cursor = tab.fieldValue.selection.max
         val nextAfter = matches.firstOrNull { it.first >= cursor }
         val target = nextAfter ?: matches.first()
         finder.wrappedAround = nextAfter == null
-        tab.setSelection(TextRange(target.first, target.last + 1))
+        tab.fieldValue = tab.fieldValue.copy(
+            selection = TextRange(target.first, target.last + 1),
+        )
     }
 
     fun runReplaceOne() {
         val tab = current ?: return
-        val sel = tab.selection
+        val sel = tab.fieldValue.selection
         if (sel.collapsed) {
             runFind()
             return
         }
-        val text = tab.text
+        val text = tab.fieldValue.text
         val selectedText = text.substring(sel.min, sel.max)
         val matchesInSelection = findMatchesCommand.execute(
             FindMatchesCommand.Input(
@@ -390,7 +376,7 @@ class EditorState(
         )
         val newText = text.substring(0, sel.min) + r.text + text.substring(sel.max)
         val cursor = sel.min + r.text.length
-        tab.setText(newText, TextRange(cursor))
+        tab.applyText(TextFieldValue(newText, TextRange(cursor)))
         runFind()
         finder.lastReplaceCount = 1
     }
@@ -399,7 +385,7 @@ class EditorState(
         val tab = current ?: return
         val r = replaceAllCommand.execute(
             ReplaceAllCommand.Input(
-                text = tab.text,
+                text = tab.fieldValue.text,
                 query = finder.query,
                 replacement = finder.replacement,
                 regex = finder.regex,
@@ -408,7 +394,7 @@ class EditorState(
         )
         finder.lastReplaceCount = r.count
         if (r.count > 0) {
-            tab.setText(r.text, TextRange(0))
+            tab.applyText(TextFieldValue(r.text, TextRange(0)))
         }
     }
 }
