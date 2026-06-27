@@ -4,6 +4,8 @@ A Notepad-style text editor and AI integration, built with **Kotlin Multiplatfor
 
 > ⚠️ Early development. Core editor and HTTP integration work; single-binary Native Image distribution are still on the roadmap.
 
+> 📌 **About the version numbering**: release tags start at `v1.0.x` because the underlying `jpackage` installer toolchain rejects a major version of `0` in its installer-metadata format. The bump to `1.x` is a packaging-constraint workaround, **not** a stability claim — the project is still very much a work in progress and many roadmap items below remain unfinished. Treat anything before a proper announcement as actively evolving.
+
 ## Goals
 
 - A Notepad replacement worth using in 2026: tabs, regex, sane encoding handling
