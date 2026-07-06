@@ -26,6 +26,7 @@ fun FrameWindowScope.AppWindow(
     AppMenuBar(state, onExit)
     ApiPresetDialog(state)
     SendPaletteDialog(state)
+    SaveFirstDialog(state, window)
     MaterialTheme {
         Column(modifier = Modifier.fillMaxSize()) {
             TabBar(state)
