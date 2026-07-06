@@ -112,6 +112,10 @@ class EditorState(
     var sendStatus by mutableStateOf<String?>(null)
     var presetDialogOpen by mutableStateOf(false)
     var sendPaletteOpen by mutableStateOf(false)
+    /** Set when the user tried to paste an image into an Untitled tab.
+     * AppWindow renders SaveFirstDialog while this is non-null so the
+     * user can Save-then-attach in one flow. */
+    var pendingImageForAttach by mutableStateOf<BufferedImage?>(null)
 
     val effectiveFontSize: Int
         get() = ((editorFont.size * zoomPercent) / 100).coerceAtLeast(EditorFont.MIN_SIZE)
@@ -337,9 +341,32 @@ class EditorState(
     private fun pasteImage(tab: TabState, image: BufferedImage) {
         val folder = AttachmentsPath.folderFor(tab, appConfig)
         if (folder == null) {
-            sendStatus = "Save this file first to attach images."
+            // Cache the image and let SaveFirstDialog (rendered in AppWindow)
+            // walk the user through Save + retry.
+            pendingImageForAttach = image
             return
         }
+        savePastedImage(tab, folder, image)
+    }
+
+    /**
+     * Called by SaveFirstDialog after the user picked a filename and the
+     * buffer was successfully saved. Attaches the previously-pending image
+     * to the (now-saved) tab.
+     */
+    fun attachPendingImage() {
+        val image = pendingImageForAttach ?: return
+        pendingImageForAttach = null
+        val tab = current ?: return
+        val folder = AttachmentsPath.folderFor(tab, appConfig) ?: return
+        savePastedImage(tab, folder, image)
+    }
+
+    fun cancelPendingImage() {
+        pendingImageForAttach = null
+    }
+
+    private fun savePastedImage(tab: TabState, folder: java.nio.file.Path, image: BufferedImage) {
         try {
             Files.createDirectories(folder)
             val filename = "img-" +
