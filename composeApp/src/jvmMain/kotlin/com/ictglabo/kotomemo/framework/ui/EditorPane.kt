@@ -50,6 +50,12 @@ fun EditorPane(state: EditorState, tab: TabState?) {
             Text("No tab", style = MaterialTheme.typography.bodyMedium)
             return@Box
         }
+        // Per-tab pane switch: TEXT is the editor, IMAGES is a thumbnail
+        // grid of the shared attachments folder for the current file.
+        if (tab.viewMode == TabViewMode.IMAGES) {
+            ImagesView(tab, state)
+            return@Box
+        }
         val text = tab.fieldValue.text
         val path = tab.contents.filePath
         // Faint colour used to render whitespace-marker glyphs (the arrow
@@ -97,6 +103,14 @@ fun EditorPane(state: EditorState, tab: TabState?) {
                         // the menu.
                         event.isCtrlPressed && event.key == Key.Equals -> {
                             state.zoomIn()
+                            true
+                        }
+                        // Intercept Ctrl+V so a clipboard image goes to the
+                        // attachments folder (saved to disk + [img:] ref
+                        // inserted) instead of being ignored by
+                        // BasicTextField's text-only paste.
+                        event.isCtrlPressed && event.key == Key.V -> {
+                            state.pasteAtCursor()
                             true
                         }
                         event.key == Key.Tab -> handleTab(tab, state, outdent = event.isShiftPressed)

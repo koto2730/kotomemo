@@ -112,6 +112,20 @@ fun FrameWindowScope.AppMenuBar(state: EditorState, onExit: () -> Unit) {
                 shortcut = KeyShortcut(Key.Zero, ctrl = true),
                 onClick = { state.zoomReset() },
             )
+            Separator()
+            // Per-tab view switcher: TEXT is the editor pane, IMAGES is
+            // the attachment thumbnail grid for the current file's shared
+            // attachments folder.
+            Item(
+                "Text view",
+                shortcut = KeyShortcut(Key.One, ctrl = true),
+                onClick = { state.showTextView() },
+            )
+            Item(
+                "Images view",
+                shortcut = KeyShortcut(Key.Two, ctrl = true),
+                onClick = { state.showImagesView() },
+            )
         }
         Menu("Send", mnemonic = 'S') {
             val presets = state.appConfig.presets

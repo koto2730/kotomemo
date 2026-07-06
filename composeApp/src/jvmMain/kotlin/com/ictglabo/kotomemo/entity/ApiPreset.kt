@@ -32,8 +32,15 @@ data class ApiPreset(
 data class AppConfig(
     val presets: List<ApiPreset> = emptyList(),
     val tokens: Map<String, String> = emptyMap(),
+    /**
+     * Name of the shared attachments folder placed alongside each edited
+     * file. Empty falls back to the default. Users can override to
+     * ".attachments", "img", etc.
+     */
+    val attachmentsFolder: String = DEFAULT_ATTACHMENTS_FOLDER,
 ) {
     companion object {
+        const val DEFAULT_ATTACHMENTS_FOLDER = "attachments"
         val EMPTY = AppConfig()
     }
 }
