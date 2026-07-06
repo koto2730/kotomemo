@@ -21,6 +21,8 @@ import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Tab
+import androidx.compose.material3.TabRow
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -59,72 +61,156 @@ fun ApiPresetDialog(state: EditorState) {
     var tokensText by remember {
         mutableStateOf(initial.tokens.entries.joinToString("\n") { "${it.key}=${it.value}" })
     }
+    var attachmentsFolderText by remember { mutableStateOf(initial.attachmentsFolder) }
     var selectedIndex by remember { mutableStateOf(if (presets.isEmpty()) -1 else 0) }
+    var activeTab by remember { mutableStateOf(0) }
+
+    fun commitAndClose() {
+        val tokens = parseTokens(tokensText)
+        val finalPresets = presets.mapIndexed { idx, p ->
+            p.copy(headers = textToHeaders(headerDrafts[idx]))
+        }
+        val folderName = attachmentsFolderText.trim().ifBlank { AppConfig.DEFAULT_ATTACHMENTS_FOLDER }
+        state.saveConfig(
+            AppConfig(
+                presets = finalPresets,
+                tokens = tokens,
+                attachmentsFolder = folderName,
+            ),
+        )
+        state.sendStatus = "Settings saved (attachments -> $folderName/)"
+        state.presetDialogOpen = false
+    }
 
     DialogWindow(
         onCloseRequest = { state.presetDialogOpen = false },
         state = dialogState,
-        title = "Configure API Presets",
+        title = "Settings",
     ) {
         MaterialTheme {
             Column(modifier = Modifier.fillMaxSize().padding(12.dp)) {
-                Row(modifier = Modifier.fillMaxWidth().height(380.dp)) {
-                    PresetList(
-                        presets = presets,
-                        selectedIndex = selectedIndex,
-                        onSelect = { selectedIndex = it },
-                        onAdd = {
-                            presets += ApiPreset(name = "new-${presets.size + 1}", url = "https://")
-                            headerDrafts += ""
-                            selectedIndex = presets.lastIndex
-                        },
-                        onRemove = {
-                            if (selectedIndex in presets.indices) {
-                                presets.removeAt(selectedIndex)
-                                headerDrafts.removeAt(selectedIndex)
-                                selectedIndex = if (presets.isEmpty()) -1
-                                else selectedIndex.coerceAtMost(presets.lastIndex)
-                            }
-                        },
+                TabRow(selectedTabIndex = activeTab) {
+                    Tab(
+                        selected = activeTab == 0,
+                        onClick = { activeTab = 0 },
+                        text = { Text("API Presets") },
                     )
-                    Spacer(Modifier.width(12.dp))
-                    if (selectedIndex in presets.indices) {
-                        PresetForm(
-                            preset = presets[selectedIndex],
-                            headersText = headerDrafts[selectedIndex],
-                            onUpdate = { presets[selectedIndex] = it },
-                            onHeadersTextChange = { headerDrafts[selectedIndex] = it },
-                            modifier = Modifier.weight(1f).fillMaxHeight(),
+                    Tab(
+                        selected = activeTab == 1,
+                        onClick = { activeTab = 1 },
+                        text = { Text("Editor") },
+                    )
+                }
+                Spacer(Modifier.height(12.dp))
+                Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
+                    when (activeTab) {
+                        0 -> ApiPresetsTab(
+                            presets = presets,
+                            headerDrafts = headerDrafts,
+                            selectedIndex = selectedIndex,
+                            onSelectIndex = { selectedIndex = it },
+                            tokensText = tokensText,
+                            onTokensChange = { tokensText = it },
                         )
-                    } else {
-                        Box(
-                            modifier = Modifier.weight(1f).fillMaxHeight(),
-                            contentAlignment = Alignment.Center,
-                        ) { Text("Select or add a preset") }
+                        1 -> EditorSettingsTab(
+                            attachmentsFolderText = attachmentsFolderText,
+                            onAttachmentsFolderChange = { attachmentsFolderText = it },
+                        )
                     }
                 }
                 Spacer(Modifier.height(12.dp))
-                Text("Tokens (one per line, key=value)", style = MaterialTheme.typography.labelLarge)
-                OutlinedTextField(
-                    value = tokensText,
-                    onValueChange = { tokensText = it },
-                    modifier = Modifier.fillMaxWidth().height(110.dp),
-                    placeholder = { Text("openai=sk-...\nmyapi=abc123") },
-                )
-                Spacer(Modifier.height(12.dp))
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Button(onClick = {
-                        val tokens = parseTokens(tokensText)
-                        val finalPresets = presets.mapIndexed { idx, p ->
-                            p.copy(headers = textToHeaders(headerDrafts[idx]))
-                        }
-                        state.saveConfig(AppConfig(presets = finalPresets, tokens = tokens))
-                        state.presetDialogOpen = false
-                    }) { Text("Save") }
+                    Button(onClick = { commitAndClose() }) { Text("Save") }
                     OutlinedButton(onClick = { state.presetDialogOpen = false }) { Text("Cancel") }
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun ApiPresetsTab(
+    presets: androidx.compose.runtime.snapshots.SnapshotStateList<ApiPreset>,
+    headerDrafts: androidx.compose.runtime.snapshots.SnapshotStateList<String>,
+    selectedIndex: Int,
+    onSelectIndex: (Int) -> Unit,
+    tokensText: String,
+    onTokensChange: (String) -> Unit,
+) {
+    Column(Modifier.fillMaxSize()) {
+        Row(modifier = Modifier.fillMaxWidth().height(340.dp)) {
+            PresetList(
+                presets = presets,
+                selectedIndex = selectedIndex,
+                onSelect = onSelectIndex,
+                onAdd = {
+                    presets += ApiPreset(name = "new-${presets.size + 1}", url = "https://")
+                    headerDrafts += ""
+                    onSelectIndex(presets.lastIndex)
+                },
+                onRemove = {
+                    if (selectedIndex in presets.indices) {
+                        presets.removeAt(selectedIndex)
+                        headerDrafts.removeAt(selectedIndex)
+                        onSelectIndex(
+                            if (presets.isEmpty()) -1
+                            else selectedIndex.coerceAtMost(presets.lastIndex),
+                        )
+                    }
+                },
+            )
+            Spacer(Modifier.width(12.dp))
+            if (selectedIndex in presets.indices) {
+                PresetForm(
+                    preset = presets[selectedIndex],
+                    headersText = headerDrafts[selectedIndex],
+                    onUpdate = { presets[selectedIndex] = it },
+                    onHeadersTextChange = { headerDrafts[selectedIndex] = it },
+                    modifier = Modifier.weight(1f).fillMaxHeight(),
+                )
+            } else {
+                Box(
+                    modifier = Modifier.weight(1f).fillMaxHeight(),
+                    contentAlignment = Alignment.Center,
+                ) { Text("Select or add a preset") }
+            }
+        }
+        Spacer(Modifier.height(12.dp))
+        Text("Tokens (one per line, key=value)", style = MaterialTheme.typography.labelLarge)
+        OutlinedTextField(
+            value = tokensText,
+            onValueChange = onTokensChange,
+            modifier = Modifier.fillMaxWidth().height(90.dp),
+            placeholder = { Text("openai=sk-...\nmyapi=abc123") },
+        )
+    }
+}
+
+@Composable
+private fun EditorSettingsTab(
+    attachmentsFolderText: String,
+    onAttachmentsFolderChange: (String) -> Unit,
+) {
+    Column(Modifier.fillMaxSize()) {
+        Text(
+            "Attachments",
+            style = MaterialTheme.typography.titleMedium,
+        )
+        Spacer(Modifier.height(4.dp))
+        Text(
+            "Pasted images (Ctrl+V of a screenshot) are saved into a shared folder next to the edited file. Change the folder name below - the default is \"${AppConfig.DEFAULT_ATTACHMENTS_FOLDER}\". Use \".attachments\" for a hidden folder, or another name like \"img\" if you prefer.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Spacer(Modifier.height(8.dp))
+        OutlinedTextField(
+            value = attachmentsFolderText,
+            onValueChange = onAttachmentsFolderChange,
+            label = { Text("Folder name") },
+            placeholder = { Text(AppConfig.DEFAULT_ATTACHMENTS_FOLDER) },
+            modifier = Modifier.fillMaxWidth(),
+            singleLine = true,
+        )
     }
 }
 

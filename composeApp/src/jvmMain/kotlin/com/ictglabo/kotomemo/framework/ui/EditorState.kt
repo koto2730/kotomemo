@@ -16,10 +16,23 @@ import com.ictglabo.kotomemo.usecase.BulkIndentCommand
 import com.ictglabo.kotomemo.usecase.FindMatchesCommand
 import com.ictglabo.kotomemo.usecase.ReplaceAllCommand
 import com.ictglabo.kotomemo.usecase.SendRequestCommand
+import java.awt.image.BufferedImage
 import java.nio.charset.Charset
 import java.nio.file.Files
 import java.nio.file.Path
+import java.time.LocalDateTime
+import java.time.format.DateTimeFormatter
+import javax.imageio.ImageIO
 import kotlin.concurrent.thread
+
+/**
+ * Which pane the tab currently shows.
+ *   TEXT   - the BasicTextField editor (default).
+ *   IMAGES - a grid view of files in the shared attachments folder
+ *            next to the buffer's saved file. Used to skim / view
+ *            screenshots the user pasted in via Ctrl+V while editing.
+ */
+enum class TabViewMode { TEXT, IMAGES }
 
 /**
  * Per-tab editor state. Uses the legacy BasicTextField API (TextFieldValue
@@ -31,6 +44,7 @@ import kotlin.concurrent.thread
 class TabState(initial: Contents) {
     var contents by mutableStateOf(initial)
     var fieldValue by mutableStateOf(TextFieldValue(initial.text))
+    var viewMode by mutableStateOf(TabViewMode.TEXT)
 
     private val undoStack = ArrayDeque<TextFieldValue>()
     private val redoStack = ArrayDeque<TextFieldValue>()
@@ -264,6 +278,14 @@ class EditorState(
     fun zoomOut() { zoomPercent = (zoomPercent - 10).coerceAtLeast(50) }
     fun zoomReset() { zoomPercent = 100 }
 
+    fun showTextView() {
+        current?.viewMode = TabViewMode.TEXT
+    }
+
+    fun showImagesView() {
+        current?.viewMode = TabViewMode.IMAGES
+    }
+
     fun selectAll() {
         val tab = current ?: return
         val len = tab.fieldValue.text.length
@@ -289,8 +311,18 @@ class EditorState(
 
     fun pasteAtCursor() {
         val tab = current ?: return
-        // Windows clipboard hands us CRLF line breaks. Normalise to LF so
-        // the buffer invariant (logical LF only) survives a paste.
+        // Image paste first: screenshots / bitmap clipboard content go to
+        // the shared attachments folder next to the current file, and a
+        // "[img: filename.png]" reference is inserted at the caret so the
+        // context remains discoverable in Text view. IMAGES view surfaces
+        // the file itself.
+        val clipboardImage = ClipboardBridge.pasteImage()
+        if (clipboardImage != null) {
+            pasteImage(tab, clipboardImage)
+            return
+        }
+        // Text fallback: Windows clipboard hands us CRLF line breaks;
+        // normalise to LF so the buffer invariant (logical LF only) holds.
         val payload = ClipboardBridge.paste()
             ?.replace("\r\n", "\n")
             ?.replace("\r", "\n")
@@ -300,6 +332,31 @@ class EditorState(
         val newText = text.substring(0, sel.min) + payload + text.substring(sel.max)
         val cursor = sel.min + payload.length
         tab.applyText(TextFieldValue(newText, TextRange(cursor)))
+    }
+
+    private fun pasteImage(tab: TabState, image: BufferedImage) {
+        val folder = AttachmentsPath.folderFor(tab, appConfig)
+        if (folder == null) {
+            sendStatus = "Save this file first to attach images."
+            return
+        }
+        try {
+            Files.createDirectories(folder)
+            val filename = "img-" +
+                LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss")) +
+                ".png"
+            val target = folder.resolve(filename)
+            ImageIO.write(image, "png", target.toFile())
+            val reference = "[img: $filename]"
+            val sel = tab.fieldValue.selection
+            val text = tab.fieldValue.text
+            val newText = text.substring(0, sel.min) + reference + text.substring(sel.max)
+            val cursor = sel.min + reference.length
+            tab.applyText(TextFieldValue(newText, TextRange(cursor)))
+            sendStatus = "Attached $filename"
+        } catch (e: Exception) {
+            sendStatus = "Failed to attach image: ${e.message}"
+        }
     }
 
     fun bulkIndent(outdent: Boolean): Boolean {
