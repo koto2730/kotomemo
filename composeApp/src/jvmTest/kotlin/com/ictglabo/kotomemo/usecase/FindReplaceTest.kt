@@ -57,4 +57,69 @@ class FindReplaceTest {
         )
         assertEquals("$1$1$1", r.text)
     }
+
+    // ---- multiline: the editor's normal case is a multi-line buffer ----
+
+    @Test
+    fun `regex caret anchor matches every line not just the first`() {
+        val r = replace.execute(
+            ReplaceAllCommand.Input(
+                "foo a\nfoo b\nfoo c",
+                "^foo",
+                "bar",
+                regex = true,
+                caseSensitive = true,
+            ),
+        )
+        assertEquals("bar a\nbar b\nbar c", r.text)
+        assertEquals(3, r.count)
+    }
+
+    @Test
+    fun `regex dollar anchor matches every line end`() {
+        val r = replace.execute(
+            ReplaceAllCommand.Input(
+                "a;\nb;\nc;",
+                ";$",
+                "",
+                regex = true,
+                caseSensitive = true,
+            ),
+        )
+        assertEquals("a\nb\nc", r.text)
+        assertEquals(3, r.count)
+    }
+
+    @Test
+    fun `regex find with caret anchor returns a range per line`() {
+        val r = find.execute(
+            FindMatchesCommand.Input("x1\nx2\nx3", "^x", regex = true, caseSensitive = true),
+        )
+        assertEquals(3, r.size)
+    }
+
+    @Test
+    fun `regex dot does not cross line boundaries`() {
+        val r = replace.execute(
+            ReplaceAllCommand.Input(
+                "ab\ncd",
+                "a.+",
+                "X",
+                regex = true,
+                caseSensitive = true,
+            ),
+        )
+        // "." must stop at the newline: only "ab" is consumed, "cd" survives.
+        assertEquals("X\ncd", r.text)
+        assertEquals(1, r.count)
+    }
+
+    @Test
+    fun `literal multiline replace all hits every line`() {
+        val r = replace.execute(
+            ReplaceAllCommand.Input("foo\nfoo\nfoo", "foo", "bar", regex = false, caseSensitive = true),
+        )
+        assertEquals("bar\nbar\nbar", r.text)
+        assertEquals(3, r.count)
+    }
 }
