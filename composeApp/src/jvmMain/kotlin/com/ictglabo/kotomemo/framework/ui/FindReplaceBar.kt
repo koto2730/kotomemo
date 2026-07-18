@@ -139,10 +139,8 @@ private fun handleBarKey(
 ): Boolean {
     if (ev.type != KeyEventType.KeyDown) return false
     return when {
-        ev.key == Key.Escape -> {
-            state.finder.hide()
-            true
-        }
+        // Escape is handled once at the window root (AppWindow) so it
+        // works regardless of focus position - no per-field case here.
         isQuery && ev.key == Key.Enter -> {
             state.runFind()
             true

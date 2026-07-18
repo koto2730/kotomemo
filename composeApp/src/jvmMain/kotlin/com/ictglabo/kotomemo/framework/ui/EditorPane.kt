@@ -89,17 +89,8 @@ fun EditorPane(state: EditorState, tab: TabState?) {
                 .onPreviewKeyEvent { event ->
                     if (event.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
                     when {
-                        // Close the Find/Replace bar from the editor too -
-                        // Esc handling used to live only on the bar's own
-                        // text fields (issue #15). Guarded on visibility so
-                        // Esc keeps its default behaviour otherwise (e.g.
-                        // cancelling an IME composition - during active
-                        // composition the IME consumes Esc before it
-                        // reaches us, so composition cancel still wins).
-                        event.key == Key.Escape && state.finder.visible -> {
-                            state.finder.hide()
-                            true
-                        }
+                        // Esc-to-close for the Find/Replace bar lives on the
+                        // window root (AppWindow), not here - see issue #15.
                         event.isCtrlPressed && event.key == Key.H -> {
                             state.finder.toggleReplace()
                             true
