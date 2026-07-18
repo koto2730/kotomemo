@@ -19,6 +19,11 @@ import androidx.compose.ui.draganddrop.DragAndDropEvent
 import androidx.compose.ui.draganddrop.DragAndDropTarget
 import androidx.compose.ui.draganddrop.DragData
 import androidx.compose.ui.draganddrop.dragData
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
 import androidx.compose.ui.window.FrameWindowScope
 import com.ictglabo.kotomemo.adapter.controller.EditorController
 import java.net.URI
@@ -69,6 +74,25 @@ fun FrameWindowScope.AppWindow(
         Column(
             modifier = Modifier
                 .fillMaxSize()
+                // Esc closes the Find/Replace bar no matter where focus is.
+                // Per-component handlers (bar fields, editor) miss the gaps:
+                // Tab traversal can park focus on checkboxes/buttons that
+                // have no key handler, and Esc dies there (issue #15
+                // follow-up). An ancestor preview handler runs before any
+                // focused descendant sees the event, so the root is the one
+                // place that catches every case.
+                .onPreviewKeyEvent { event ->
+                    if (
+                        event.type == KeyEventType.KeyDown &&
+                        event.key == Key.Escape &&
+                        state.finder.visible
+                    ) {
+                        state.finder.hide()
+                        true
+                    } else {
+                        false
+                    }
+                }
                 .dragAndDropTarget(
                     shouldStartDragAndDrop = { true },
                     target = fileDropTarget,
