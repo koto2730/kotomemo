@@ -17,7 +17,15 @@ class FindMatchesCommand : Command<FindMatchesCommand.Input, List<IntRange>> {
 
     companion object {
         fun compile(input: Input): Regex? {
-            val opts = if (input.caseSensitive) emptySet() else setOf(RegexOption.IGNORE_CASE)
+            val opts = buildSet {
+                if (!input.caseSensitive) add(RegexOption.IGNORE_CASE)
+                // Editor convention (VS Code, Notepad++, CodeMirror): ^ and $
+                // anchor to line starts/ends, not just the buffer edges.
+                // Without MULTILINE, "^foo" only ever matches on line 1.
+                // DOTALL stays off - "." not crossing newlines is the same
+                // convention those editors default to.
+                if (input.regex) add(RegexOption.MULTILINE)
+            }
             val raw = if (input.regex) input.query else Regex.escape(input.query)
             return runCatching { Regex(raw, opts) }.getOrNull()
         }
