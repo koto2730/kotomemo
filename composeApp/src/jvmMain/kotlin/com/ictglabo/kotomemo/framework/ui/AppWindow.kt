@@ -101,7 +101,7 @@ fun FrameWindowScope.AppWindow(
             TabBar(state)
             FindReplaceBar(state)
             Box(modifier = Modifier.weight(1f)) {
-                EditorPane(state, state.current)
+                EditorPane(state)
             }
             StatusBar(state)
         }
